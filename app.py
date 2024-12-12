@@ -25,6 +25,7 @@ class QueryRequest(BaseModel):
     student_ans: str
     expected_ans: str
     total_score: int
+    guidelines: Optional[str] = None  # Added guidelines field
 
 
 class ProviderRequest(BaseModel):
@@ -53,7 +54,8 @@ async def get_response(request: QueryRequest):
         student_ans=request.student_ans,
         expected_ans=request.expected_ans,
         total_score=request.total_score,
-        question=request.question  # Pass the question if provided
+        question=request.question,
+        guidelines=request.guidelines  # Pass guidelines if provided
     )
     return result
 

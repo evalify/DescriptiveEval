@@ -93,6 +93,11 @@ document.addEventListener('DOMContentLoaded', function() {
             formData.question = question;
         }
 
+        const guidelines = document.getElementById('guidelines').value.trim();
+        if (guidelines) {
+            formData.guidelines = guidelines;
+        }
+
         try {
             setLoadingState(true);
             const result = await handleEvaluation(formData);
