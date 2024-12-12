@@ -1,17 +1,19 @@
 from langchain_ollama import OllamaLLM
 from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
-import json
 from langchain.output_parsers import ResponseSchema, StructuredOutputParser
 import os
 from enum import Enum
 
 from dotenv import load_dotenv
+
 load_dotenv()
+
 
 class LLMProvider(Enum):
     OLLAMA = "ollama"
     GROQ = "groq"
+
 
 def get_llm(provider: LLMProvider = LLMProvider.OLLAMA):
     if provider == LLMProvider.OLLAMA:
@@ -23,6 +25,7 @@ def get_llm(provider: LLMProvider = LLMProvider.OLLAMA):
         )
     else:
         raise ValueError(f"Unsupported LLM provider: {provider}")
+
 
 # Initialize default LLM
 current_provider = LLMProvider.GROQ  # Change to LLMProvider.OLLAMA if desired
@@ -48,11 +51,13 @@ Expected Answer: {expected_ans}
 Total Score: {total_score}
 '''
 
+
 def set_llm_provider(provider: LLMProvider):
     global llm, current_provider
     current_provider = provider
     llm = get_llm(provider)
     return llm
+
 
 def score(llm, student_ans, expected_ans, total_score, question=None):
     if not student_ans or not expected_ans or total_score < 0:
@@ -60,10 +65,10 @@ def score(llm, student_ans, expected_ans, total_score, question=None):
             "score": 0,
             "reason": f"Invalid input parameters: student_ans='{student_ans}', expected_ans='{expected_ans}', total_score='{total_score}'"
         }
-    
+
     question_context = f" to the question" if question else ""
     question_section = f"\nQuestion: {question}\n" if question else "\n"
-    
+
     prompt_template = PromptTemplate(
         input_variables=['student_ans', 'expected_ans', 'total_score'],
         partial_variables={
@@ -73,7 +78,7 @@ def score(llm, student_ans, expected_ans, total_score, question=None):
         },
         template=template
     )
-    
+
     _input = prompt_template.format(
         student_ans=student_ans,
         expected_ans=expected_ans,
@@ -86,7 +91,7 @@ def score(llm, student_ans, expected_ans, total_score, question=None):
             response = response.content
         elif not isinstance(response, str):
             response = str(response)
-        
+
         parsed_response = output_parser.parse(response)
         return {
             "score": int(parsed_response.get("score", 0)),

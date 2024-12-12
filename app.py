@@ -4,7 +4,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 from model import score, llm, LLMProvider, set_llm_provider
-import json
 from typing import Optional
 
 app = FastAPI()
@@ -20,18 +19,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 class QueryRequest(BaseModel):
     question: Optional[str] = None
     student_ans: str
     expected_ans: str
     total_score: int
 
+
 class ProviderRequest(BaseModel):
     provider: str
+
 
 @app.get("/")
 async def read_index():
     return FileResponse('static/index.html')
+
 
 @app.post("/set-provider")
 async def change_provider(request: ProviderRequest):
@@ -41,6 +44,7 @@ async def change_provider(request: ProviderRequest):
         return {"message": f"Successfully switched to {provider.value}"}
     except ValueError as e:
         return {"error": str(e)}
+
 
 @app.post("/score")
 async def get_response(request: QueryRequest):
@@ -53,11 +57,8 @@ async def get_response(request: QueryRequest):
     )
     return result
 
+
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8020)
-
-
-
-
-
