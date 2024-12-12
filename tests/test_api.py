@@ -31,9 +31,8 @@ def test_scoring_endpoint(client, sample_answer):
         json=sample_answer
     )
     assert response.status_code == 200
-    
-    # Parse the response
-    result = json.loads(response.json())
+
+    result = response.json()
     assert "score" in result
     assert "reason" in result
     assert isinstance(result["score"], int)
@@ -47,5 +46,33 @@ def test_scoring_empty_answer(client, sample_answer):
         json=sample_answer
     )
     assert response.status_code == 200
-    result = json.loads(response.json())
+    result = response.json()
     assert result["score"] == 0
+    assert isinstance(result["reason"], str)
+
+def test_scoring_with_question(client, sample_answer):
+    sample_answer["question"] = "Explain the process of photosynthesis."
+    response = client.post(
+        "/score",
+        json=sample_answer
+    )
+    assert response.status_code == 200
+
+    result = response.json()
+    assert "score" in result
+    assert "reason" in result
+    assert isinstance(result["score"], int)
+    assert isinstance(result["reason"], str)
+
+def test_scoring_without_question(client, sample_answer):
+    if "question" in sample_answer:
+        del sample_answer["question"]
+    response = client.post(
+        "/score",
+        json=sample_answer
+    )
+    assert response.status_code == 200
+
+    result = response.json()
+    assert "score" in result
+    assert "reason" in result
