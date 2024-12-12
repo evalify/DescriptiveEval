@@ -1,26 +1,37 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from model import score, llm, LLMProvider, set_llm_provider
+import json
+from typing import Optional
 
 app = FastAPI()
 
+# Mount static files directory
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  
+    allow_origins=["*"],  # Consider restricting origins in production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 class QueryRequest(BaseModel):
-    question: str
+    question: Optional[str] = None
     student_ans: str
     expected_ans: str
     total_score: int
 
 class ProviderRequest(BaseModel):
     provider: str
+
+@app.get("/")
+async def read_index():
+    return FileResponse('static/index.html')
 
 @app.post("/set-provider")
 async def change_provider(request: ProviderRequest):
@@ -33,13 +44,14 @@ async def change_provider(request: ProviderRequest):
 
 @app.post("/score")
 async def get_response(request: QueryRequest):
-    response_json = score(
+    result = score(
         llm=llm,
         student_ans=request.student_ans,
         expected_ans=request.expected_ans,
-        total_score=request.total_score
+        total_score=request.total_score,
+        question=request.question  # Pass the question if provided
     )
-    return response_json
+    return result
 
 if __name__ == "__main__":
     import uvicorn
