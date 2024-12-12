@@ -1,6 +1,6 @@
 from langchain_ollama import OllamaLLM
 from langchain_groq import ChatGroq
-from langchain import PromptTemplate
+from langchain_core.prompts import PromptTemplate
 import json
 from langchain.output_parsers import ResponseSchema, StructuredOutputParser
 import os
@@ -25,7 +25,7 @@ def get_llm(provider: LLMProvider = LLMProvider.OLLAMA):
         raise ValueError(f"Unsupported LLM provider: {provider}")
 
 # Initialize default LLM
-current_provider = LLMProvider.GROQ  # Can be changed to LLMProvider.GROQ
+current_provider = LLMProvider.GROQ  # Change to LLMProvider.OLLAMA if desired
 llm = get_llm(current_provider)
 
 response_schemas = [
@@ -37,10 +37,10 @@ output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
 format_instructions = output_parser.get_format_instructions()
 
 template = '''
-You are an expert evaluator. Your task is to assess the student's answer based solely on the expected answer provided. Evaluate the student's answer and assign a score out of the total score. Additionally, provide a short and concise reason for the score, focusing only on the alignment between the student's answer and the expected answer. Do not consider any factors outside the provided expected answer.
+You are an expert evaluator. Your task is to assess the student's answer{question_context} based solely on the expected answer provided. Evaluate the student's answer and assign a score out of the total score. Additionally, provide a short and concise reason for the score, focusing only on the alignment between the student's answer and the expected answer. Do not consider any factors outside the provided expected answer.
 
 {format_instructions}
-
+{question_section}
 Student's Answer: {student_ans}
 
 Expected Answer: {expected_ans}
@@ -48,27 +48,52 @@ Expected Answer: {expected_ans}
 Total Score: {total_score}
 '''
 
-prompt = PromptTemplate(
-    input_variables=['student_ans', 'expected_ans', 'total_score'],
-    partial_variables={"format_instructions": format_instructions},
-    template=template
-)
-
 def set_llm_provider(provider: LLMProvider):
     global llm, current_provider
     current_provider = provider
     llm = get_llm(provider)
     return llm
 
-def score(llm, student_ans, expected_ans, total_score):
-    _input = prompt.format(
+def score(llm, student_ans, expected_ans, total_score, question=None):
+    if not student_ans or not expected_ans or total_score < 0:
+        return {
+            "score": 0,
+            "reason": f"Invalid input parameters: student_ans='{student_ans}', expected_ans='{expected_ans}', total_score='{total_score}'"
+        }
+    
+    question_context = f" to the question" if question else ""
+    question_section = f"\nQuestion: {question}\n" if question else "\n"
+    
+    prompt_template = PromptTemplate(
+        input_variables=['student_ans', 'expected_ans', 'total_score'],
+        partial_variables={
+            "format_instructions": format_instructions,
+            "question_context": question_context,
+            "question_section": question_section
+        },
+        template=template
+    )
+    
+    _input = prompt_template.format(
         student_ans=student_ans,
         expected_ans=expected_ans,
         total_score=total_score
     )
-    response = llm(_input)
+
     try:
+        response = llm.invoke(_input)
+        if hasattr(response, 'content'):
+            response = response.content
+        elif not isinstance(response, str):
+            response = str(response)
+        
         parsed_response = output_parser.parse(response)
-        return json.dumps(parsed_response, indent=4)
+        return {
+            "score": int(parsed_response.get("score", 0)),
+            "reason": str(parsed_response.get("reason", "No reason provided"))
+        }
     except Exception as e:
-        raise ValueError(f"Failed to parse LLM response: {e}")
+        return {
+            "score": 0,
+            "reason": f"Error processing response: {str(e)}"
+        }
