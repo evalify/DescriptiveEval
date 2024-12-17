@@ -33,6 +33,14 @@ document.addEventListener('DOMContentLoaded', function() {
             <h2>Evaluation Result</h2>
             <div class="score">Score: <span>${result.score}</span></div>
             <div class="reason">Reason: <span>${result.reason}</span></div>
+            <div class="rubric">
+                <h3>Evaluation Rubric</h3>
+                <pre id="rubric-content">${result.rubric || 'No rubric available'}</pre>
+            </div>
+            <div class="breakdown">
+                <h3>Score Breakdown</h3>
+                <pre id="breakdown-content">${result.breakdown || 'No breakdown available'}</pre>
+            </div>
         `;
         resultDiv.classList.remove('hidden');
     }
