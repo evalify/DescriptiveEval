@@ -4,6 +4,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain.output_parsers import ResponseSchema, StructuredOutputParser
 import os
 from enum import Enum
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -16,12 +17,11 @@ class LLMProvider(Enum):
 
 def get_llm(provider: LLMProvider = LLMProvider.OLLAMA):
     if provider == LLMProvider.OLLAMA:
-        return OllamaLLM(model="llama3.3")
+        return OllamaLLM(model="llama3.1")
     elif provider == LLMProvider.GROQ:
         return ChatGroq(
             api_key=os.getenv("GROQ_API_KEY"),
             model_name="llama-3.3-70b-versatile"
-            # model_name="llama-3.1-8b-instant"
         )
     else:
         raise ValueError(f"Unsupported LLM provider: {provider}")
@@ -82,7 +82,7 @@ def set_llm_provider(provider: LLMProvider):
     return llm
 
 
-def score(llm, student_ans, expected_ans, total_score, question=None, guidelines=None):
+async def score(llm, student_ans, expected_ans, total_score, question=None, guidelines=None):
     if not student_ans or not expected_ans or total_score < 0:
         return {
             "score": 0.0,
@@ -113,7 +113,7 @@ def score(llm, student_ans, expected_ans, total_score, question=None, guidelines
     )
 
     try:
-        response = llm.invoke(_input)
+        response = await llm.ainvoke(_input)
         if hasattr(response, 'content'):
             response = response.content
         elif not isinstance(response, str):

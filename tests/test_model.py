@@ -17,14 +17,15 @@ def test_llm_provider_switching():
     assert ollama_llm != groq_llm
 
 
-def test_score_calculation():
+@pytest.mark.asyncio
+async def test_score_calculation():
     llm = get_llm(LLMProvider.GROQ)
     params = {
         "student_ans": "Photosynthesis is the process where plants convert sunlight into energy.",
         "expected_ans": "Photosynthesis is the process by which plants convert light energy into chemical energy to produce glucose using carbon dioxide and water.",
         "total_score": 10
     }
-    result = score(llm=llm, **params)
+    result = await score(llm=llm, **params)
     log_evaluation("Basic Score Calculation", params, result)
     print_result("Basic Score Calculation", result)
     assert isinstance(result["score"], float)
@@ -32,21 +33,23 @@ def test_score_calculation():
     assert 0 <= result["score"] <= 10
 
 
-def test_invalid_inputs():
+@pytest.mark.asyncio
+async def test_invalid_inputs():
     llm = get_llm(LLMProvider.GROQ)
     params = {
         "student_ans": "",
         "expected_ans": "",
         "total_score": -1
     }
-    result = score(llm=llm, **params)
+    result = await score(llm=llm, **params)
     log_evaluation("Invalid Inputs", params, result)
     print_result("Invalid Inputs", result)
     assert result["score"] == 0
     assert isinstance(result["reason"], str)
 
 
-def test_score_with_question():
+@pytest.mark.asyncio
+async def test_score_with_question():
     llm = get_llm(LLMProvider.GROQ)
     params = {
         "question": "Explain the process of photosynthesis.",
@@ -54,7 +57,7 @@ def test_score_with_question():
         "expected_ans": "Photosynthesis is the process by which plants convert light energy into chemical energy to produce glucose using carbon dioxide and water.",
         "total_score": 10
     }
-    result = score(llm=llm, **params)
+    result = await score(llm=llm, **params)
     log_evaluation("Score With Question", params, result)
     print_result("Score With Question", result)
     assert isinstance(result["score"], float)
@@ -62,7 +65,8 @@ def test_score_with_question():
     assert 0 <= result["score"] <= 10
 
 
-def test_score_with_guidelines():
+@pytest.mark.asyncio
+async def test_score_with_guidelines():
     llm = get_llm(LLMProvider.GROQ)
     params = {
         "question": "Explain the process of photosynthesis.",
@@ -71,7 +75,7 @@ def test_score_with_guidelines():
         "expected_ans": "Photosynthesis is the process by which plants convert light energy into chemical energy to produce glucose using carbon dioxide and water.",
         "total_score": 10
     }
-    result = score(llm=llm, **params)
+    result = await score(llm=llm, **params)
     log_evaluation("Score With Guidelines", params, result)
     print_result("Score With Guidelines", result)
     assert isinstance(result["score"], float)
@@ -79,7 +83,8 @@ def test_score_with_guidelines():
     assert 0 <= result["score"] <= 10
 
 
-def test_score_with_question_and_guidelines():
+@pytest.mark.asyncio
+async def test_score_with_question_and_guidelines():
     llm = get_llm(LLMProvider.GROQ)
     params = {
         "question": "Explain the process of photosynthesis.",
@@ -88,14 +93,16 @@ def test_score_with_question_and_guidelines():
         "expected_ans": "Photosynthesis is the process by which plants convert light energy into chemical energy to produce glucose using carbon dioxide and water.",
         "total_score": 10
     }
-    result = score(llm=llm, **params)
+    result = await score(llm=llm, **params)
     log_evaluation("Score With Question and Guidelines", params, result)
     print_result("Score With Question and Guidelines", result)
     assert isinstance(result["score"], float)
     assert isinstance(result["reason"], str)
     assert 0 <= result["score"] <= 10
 
-def test_rubic_and_breakdown():
+
+@pytest.mark.asyncio
+async def test_rubic_and_breakdown():
     llm = get_llm(LLMProvider.GROQ)
     params = {
         "question": "Explain the process of photosynthesis.",
@@ -104,7 +111,7 @@ def test_rubic_and_breakdown():
         "expected_ans": "Photosynthesis is the process by which plants convert light energy into chemical energy to produce glucose using carbon dioxide and water.",
         "total_score": 10
     }
-    result = score(llm=llm, **params)
+    result = await score(llm=llm, **params)
     log_evaluation("Score With Question and Guidelines", params, result)
     print_result("Score With Question and Guidelines", result)
     assert isinstance(result["score"], float)

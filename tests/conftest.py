@@ -22,13 +22,14 @@ def pytest_configure(config):
 sys.path.append(str(Path(__file__).parent.parent))
 
 import pytest
-from fastapi.testclient import TestClient
+from httpx import AsyncClient
 from app import app
 
 
 @pytest.fixture
-def client():
-    return TestClient(app)
+async def client():
+    async with AsyncClient(app=app, base_url="http://test") as ac:
+        yield ac
 
 
 @pytest.fixture

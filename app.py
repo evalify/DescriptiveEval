@@ -49,7 +49,7 @@ async def change_provider(request: ProviderRequest):
 
 @app.post("/score")
 async def get_response(request: QueryRequest):
-    result = score(
+    result = await score(
         llm=llm,
         student_ans=request.student_ans,
         expected_ans=request.expected_ans,
