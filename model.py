@@ -16,7 +16,7 @@ class LLMProvider(Enum):
 
 def get_llm(provider: LLMProvider = LLMProvider.OLLAMA):
     if provider == LLMProvider.OLLAMA:
-        return OllamaLLM(model="llama3.1")
+        return OllamaLLM(model="llama3.3")
     elif provider == LLMProvider.GROQ:
         return ChatGroq(
             api_key=os.getenv("GROQ_API_KEY"),
