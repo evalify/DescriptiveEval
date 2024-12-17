@@ -55,7 +55,7 @@ def test_scoring_endpoint(client, sample_answer):
     result = response.json()
     assert "score" in result
     assert "reason" in result
-    assert isinstance(result["score"], int)
+    assert isinstance(result["score"], float)
     assert isinstance(result["reason"], str)
     assert 0 <= result["score"] <= sample_answer["total_score"]
 
@@ -91,7 +91,7 @@ def test_scoring_with_question(client, sample_answer):
     result = response.json()
     assert "score" in result
     assert "reason" in result
-    assert isinstance(result["score"], int)
+    assert isinstance(result["score"], float)
     assert isinstance(result["reason"], str)
 
 
@@ -107,3 +107,42 @@ def test_scoring_without_question(client, sample_answer):
     result = response.json()
     assert "score" in result
     assert "reason" in result
+
+
+def test_scoring_with_guidelines(client, sample_answer):
+    sample_answer["guidelines"] = "Focus on technical accuracy and completeness"
+    response = client.post(
+        "/score",
+        json=sample_answer
+    )
+    result = response.json()
+    log_evaluation(
+        "API Scoring With Guidelines",
+        {"request": sample_answer, "status_code": response.status_code},
+        result
+    )
+    print_api_result("Score With Guidelines", response)
+    assert response.status_code == 200
+    assert "score" in result
+    assert "reason" in result
+    assert isinstance(result["score"], float)
+    assert isinstance(result["reason"], str)
+
+def test_scoring_with_empty_guidelines(client, sample_answer):
+    sample_answer["guidelines"] = ""
+    response = client.post(
+        "/score",
+        json=sample_answer
+    )
+    result = response.json()
+    log_evaluation(
+        "API Scoring With Empty Guidelines",
+        {"request": sample_answer, "status_code": response.status_code},
+        result
+    )
+    print_api_result("Score With Empty Guidelines", response)
+    assert response.status_code == 200
+    assert "score" in result
+    assert "reason" in result
+    assert isinstance(result["score"], float)
+    assert isinstance(result["reason"], str)

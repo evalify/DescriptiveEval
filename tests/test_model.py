@@ -27,7 +27,7 @@ def test_score_calculation():
     result = score(llm=llm, **params)
     log_evaluation("Basic Score Calculation", params, result)
     print_result("Basic Score Calculation", result)
-    assert isinstance(result["score"], int)
+    assert isinstance(result["score"], float)
     assert isinstance(result["reason"], str)
     assert 0 <= result["score"] <= 10
 
@@ -57,6 +57,62 @@ def test_score_with_question():
     result = score(llm=llm, **params)
     log_evaluation("Score With Question", params, result)
     print_result("Score With Question", result)
-    assert isinstance(result["score"], int)
+    assert isinstance(result["score"], float)
     assert isinstance(result["reason"], str)
     assert 0 <= result["score"] <= 10
+
+
+def test_score_with_guidelines():
+    llm = get_llm(LLMProvider.GROQ)
+    params = {
+        "question": "Explain the process of photosynthesis.",
+        "guidelines": "Evaluate based on: 1) Understanding of energy conversion 2) Mention of required materials 3) Accuracy of process description",
+        "student_ans": "Photosynthesis is the process where plants convert sunlight into energy.",
+        "expected_ans": "Photosynthesis is the process by which plants convert light energy into chemical energy to produce glucose using carbon dioxide and water.",
+        "total_score": 10
+    }
+    result = score(llm=llm, **params)
+    log_evaluation("Score With Guidelines", params, result)
+    print_result("Score With Guidelines", result)
+    assert isinstance(result["score"], float)
+    assert isinstance(result["reason"], str)
+    assert 0 <= result["score"] <= 10
+
+
+def test_score_with_question_and_guidelines():
+    llm = get_llm(LLMProvider.GROQ)
+    params = {
+        "question": "Explain the process of photosynthesis.",
+        "guidelines": "Focus on accuracy and completeness of the explanation.",
+        "student_ans": "Photosynthesis is the process where plants convert sunlight into energy.",
+        "expected_ans": "Photosynthesis is the process by which plants convert light energy into chemical energy to produce glucose using carbon dioxide and water.",
+        "total_score": 10
+    }
+    result = score(llm=llm, **params)
+    log_evaluation("Score With Question and Guidelines", params, result)
+    print_result("Score With Question and Guidelines", result)
+    assert isinstance(result["score"], float)
+    assert isinstance(result["reason"], str)
+    assert 0 <= result["score"] <= 10
+
+def test_rubic_and_breakdown():
+    llm = get_llm(LLMProvider.GROQ)
+    params = {
+        "question": "Explain the process of photosynthesis.",
+        "guidelines": "Focus on accuracy and completeness of the explanation.",
+        "student_ans": "Photosynthesis is the process where plants convert sunlight into energy.",
+        "expected_ans": "Photosynthesis is the process by which plants convert light energy into chemical energy to produce glucose using carbon dioxide and water.",
+        "total_score": 10
+    }
+    result = score(llm=llm, **params)
+    log_evaluation("Score With Question and Guidelines", params, result)
+    print_result("Score With Question and Guidelines", result)
+    assert isinstance(result["score"], float)
+    assert isinstance(result["reason"], str)
+    assert 0 <= result["score"] <= 10
+    assert "rubric" in result
+    assert "breakdown" in result
+    assert isinstance(result["rubric"], str)
+    assert isinstance(result["breakdown"], str)
+    assert len(result["rubric"]) > 0
+    assert len(result["breakdown"]) > 0

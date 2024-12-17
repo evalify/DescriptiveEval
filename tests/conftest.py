@@ -35,6 +35,7 @@ def client():
 def sample_answer():
     return {
         "question": "What is photosynthesis?",
+        "guidelines": "Focus on: 1) Basic concept 2) Energy conversion 3) Raw materials needed",
         "student_ans": "Photosynthesis is the process where plants convert sunlight into energy.",
         "expected_ans": "Photosynthesis is the process by which plants convert light energy into chemical energy to produce glucose using carbon dioxide and water.",
         "total_score": 10
