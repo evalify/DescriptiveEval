@@ -28,7 +28,7 @@ def get_llm(provider: LLMProvider = LLMProvider.OLLAMA):
 
 
 # Initialize default LLM
-current_provider = LLMProvider.GROQ  # Change to LLMProvider.OLLAMA if desired
+current_provider = LLMProvider.OLLAMA  # Change to LLMProvider.OLLAMA if desired
 llm = get_llm(current_provider)
 
 # Update response schemas to include 'rubric' and 'breakdown'
