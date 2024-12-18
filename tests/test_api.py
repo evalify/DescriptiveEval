@@ -167,48 +167,67 @@ async def test_scoring_with_empty_guidelines(client, sample_answer):
 
 @pytest.mark.asyncio
 async def test_concurrent_vs_sequential_scoring(client, sample_answer):
-    # Prepare two different questions
-    first_query = sample_answer.copy()
-    second_query = sample_answer.copy()
-    second_query["question"] = "What is cellular respiration?"
-    second_query["expected_ans"] = "Cellular respiration is the process by which cells break down glucose to produce ATP, using oxygen and releasing carbon dioxide and water."
+    # Prepare four different questions
+    queries = [
+        {
+            **sample_answer,
+            "question": "What is photosynthesis?",
+            "expected_ans": "Photosynthesis is the process by which plants convert light energy into chemical energy to produce glucose using carbon dioxide and water."
+        },
+        {
+            **sample_answer,
+            "question": "What is cellular respiration?",
+            "expected_ans": "Cellular respiration is the process by which cells break down glucose to produce ATP, using oxygen and releasing carbon dioxide and water."
+        },
+        {
+            **sample_answer,
+            "question": "What is mitosis?",
+            "expected_ans": "Mitosis is a type of cell division where one cell divides into two identical daughter cells, each containing the same number of chromosomes as the parent cell."
+        },
+        {
+            **sample_answer,
+            "question": "What is meiosis?",
+            "expected_ans": "Meiosis is a type of cell division that produces four daughter cells, each with half the number of chromosomes as the parent cell, essential for sexual reproduction."
+        }
+    ]
     
     # Test sequential execution
     start_time = time.time()
-    response1 = await client.post("/score", json=first_query)
-    response2 = await client.post("/score", json=second_query)
+    sequential_responses = []
+    for query in queries:
+        response = await client.post("/score", json=query)
+        sequential_responses.append(response)
     sequential_time = time.time() - start_time
     
     # Test concurrent execution
     start_time = time.time()
-    responses = await asyncio.gather(
-        client.post("/score", json=first_query),
-        client.post("/score", json=second_query)
+    concurrent_responses = await asyncio.gather(
+        *[client.post("/score", json=query) for query in queries]
     )
     concurrent_time = time.time() - start_time
     
     # Log results
-    log_evaluation(
-        "Performance Comparison",
-        {
-            "sequential_time": sequential_time,
-            "concurrent_time": concurrent_time,
-            "improvement": f"{(sequential_time - concurrent_time) / sequential_time * 100:.2f}%"
-        },
-        {"status": "completed"}
-    )
+    performance_data = {
+        "sequential_time": sequential_time,
+        "concurrent_time": concurrent_time,
+        "improvement": f"{(sequential_time - concurrent_time) / sequential_time * 100:.2f}%",
+        "num_queries": len(queries)
+    }
     
-    print(f"\n=== Performance Test Results ===")
+    log_evaluation("Performance Comparison", performance_data, {"status": "completed"})
+    
+    print(f"\n=== Performance Test Results ({len(queries)} queries) ===")
     print(f"Sequential Time: {sequential_time:.2f}s")
     print(f"Concurrent Time: {concurrent_time:.2f}s")
     print(f"Improvement: {(sequential_time - concurrent_time) / sequential_time * 100:.2f}%")
     print("=" * 50)
     
-    # Verify responses
-    assert response1.status_code == 200
-    assert response2.status_code == 200
-    assert responses[0].status_code == 200
-    assert responses[1].status_code == 200
+    # Verify all responses
+    for response in sequential_responses + list(concurrent_responses):
+        assert response.status_code == 200
+        result = response.json()
+        assert "score" in result
+        assert "reason" in result
     
     # Verify concurrent execution was faster
     assert concurrent_time < sequential_time, "Concurrent execution should be faster than sequential"
