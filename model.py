@@ -83,10 +83,18 @@ def set_llm_provider(provider: LLMProvider):
 
 
 async def score(llm, student_ans, expected_ans, total_score, question=None, guidelines=None):
-    if not student_ans or not expected_ans or total_score < 0:
+    if not expected_ans or expected_ans.strip() == "" or total_score < 1:
         return {
             "score": 0.0,
-            "reason": f"Invalid input parameters: student_ans='{student_ans}', expected_ans='{expected_ans}', total_score='{total_score}'",
+            "reason": f"Invalid input parameters: expected_ans='{expected_ans}', total_score='{total_score}'",
+            "rubric": "No rubric available",
+            "breakdown": "No breakdown available"
+        }
+
+    if not student_ans or student_ans.strip() == "":
+        return {
+            "score": 0.0,
+            "reason": "Student answer is empty or missing",
             "rubric": "No rubric available",
             "breakdown": "No breakdown available"
         }
@@ -132,4 +140,57 @@ async def score(llm, student_ans, expected_ans, total_score, question=None, guid
             "breakdown": "Error: Could not generate breakdown",
             "score": 0.0,
             "reason": f"Error processing response: {str(e)}"
+        }
+
+
+async def generate_guidelines(llm, question: str, expected_ans: str, score: int = 10):
+    if not question or not expected_ans:
+        return {
+            "guidelines": "Provide a question and expected answer to generate evaluation rubric/guidelines",
+        }
+
+    # Define response schema for guidelines
+    guidelines_schema = [
+        ResponseSchema(name="guidelines", description="The evaluation guidelines and criteria")
+    ]
+    guidelines_parser = StructuredOutputParser.from_response_schemas(guidelines_schema)
+    format_instructions = guidelines_parser.get_format_instructions()
+
+    prompt_template = PromptTemplate(
+        input_variables=['question', 'expected_ans', 'score'],
+        partial_variables={"format_instructions": format_instructions},
+        template="""
+    You are an expert rubric creator. 
+    Given the question: {question} 
+    and the expected answer: {expected_ans},
+    and the total score: {score},
+    list the key criteria to evaluate the student's answer thoroughly.
+    Include that this evaluation rubric will be used for evaluating the student's answers, 
+    which will be evaluated using the score breakdown suggested by the 'evaluation criteria'.
+    Define the scoring approach for each criterion.
+
+    {format_instructions}
+    """
+    )
+
+    _input = prompt_template.format(
+        question=question,
+        expected_ans=expected_ans,
+        score=score
+    )
+
+    try:
+        response = await llm.ainvoke(_input)
+        if hasattr(response, 'content'):
+            response = response.content
+        elif not isinstance(response, str):
+            response = str(response)
+
+        parsed_response = guidelines_parser.parse(response)
+        return {
+            "guidelines": str(parsed_response.get("guidelines", "No guidelines available"))
+        }
+    except Exception as e:
+        return {
+            "guidelines": f"Error processing response: {str(e)}"
         }
