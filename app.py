@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from model import score, llm, LLMProvider, set_llm_provider
+from model import score, llm, LLMProvider, set_llm_provider, generate_guidelines
 from typing import Optional
 
 app = FastAPI()
@@ -32,6 +32,12 @@ class ProviderRequest(BaseModel):
     provider: str
 
 
+class GuidelinesRequest(BaseModel):
+    question: Optional[str] = None
+    expected_ans: Optional[str] = None
+    total_score: Optional[int] = 10
+
+
 @app.get("/")
 async def read_index():
     return FileResponse('static/index.html')
@@ -58,6 +64,17 @@ async def get_response(request: QueryRequest):
         guidelines=request.guidelines  # Pass guidelines if provided
     )
     return result
+
+
+@app.post("/generate-guidelines")
+async def generate_guidelines_api(request: GuidelinesRequest):
+    guidelines_result = await generate_guidelines(
+        llm,
+        question=request.question or "",
+        expected_ans=request.expected_ans or "",
+        score=request.total_score or 10
+    )
+    return guidelines_result
 
 
 if __name__ == "__main__":
