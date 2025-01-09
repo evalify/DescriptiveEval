@@ -15,20 +15,20 @@ class LLMProvider(Enum):
     GROQ = "groq"
 
 
-def get_llm(provider: LLMProvider = LLMProvider.OLLAMA):
+def get_llm(provider: LLMProvider = LLMProvider.OLLAMA, api_key=None, model_name=None):
     if provider == LLMProvider.OLLAMA:
-        return OllamaLLM(model="llama3.3")
+        return OllamaLLM(model=model_name if model_name else "llama3.3")
     elif provider == LLMProvider.GROQ:
         return ChatGroq(
-            api_key=os.getenv("GROQ_API_KEY"),
-            model_name="llama-3.3-70b-versatile"
+            api_key=api_key if api_key else os.getenv("GROQ_API_KEY"),
+            model_name=model_name if model_name else "llama-3.3-70b-specdec"
         )
     else:
         raise ValueError(f"Unsupported LLM provider: {provider}")
 
 
 # Initialize default LLM
-current_provider = LLMProvider.OLLAMA  # Change to LLMProvider.OLLAMA if desired
+current_provider = LLMProvider.GROQ  # Change to LLMProvider.OLLAMA if desired
 llm = get_llm(current_provider)
 
 # Update response schemas to include 'rubric' and 'breakdown'
