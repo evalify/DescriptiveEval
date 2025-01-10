@@ -35,7 +35,7 @@ llm = get_llm(current_provider)
 response_schemas = [
     ResponseSchema(name="rubric", description="The evaluation rubric as a markdown formatted string"),
     ResponseSchema(name="score", description="The assigned score as a floating point number"),
-    ResponseSchema(name="reason", description="A short and concise reason for the assigned score")
+    ResponseSchema(name="reason", description="A short and concise reason for the assigned score"),
     ResponseSchema(name="breakdown", description="Detailed breakdown of the allocated marks as a markdown formatted string"),
 ]
 
