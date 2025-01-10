@@ -97,25 +97,26 @@ async def bulk_evaluate_quiz_responses(database_url: str, quiz_id: str):
     # quiz_responses = get_quiz_responses(database_url, quiz_id)
     # questions = get_all_questions(quiz_id)
 
-    with open('quiz_responses.json', 'r') as f:
+    with open('data/json/quiz_responses.json', 'r') as f:
         quiz_responses = json.load(f)
-
-    with open('mongo_questions.json', 'r') as f:
+    with open('data/json/mongo_questions.json', 'r') as f:
         questions = json.load(f)
 
     keys = [os.getenv("GROQ_API_KEY"), os.getenv("GROQ_API_KEY2"), os.getenv("GROQ_API_KEY3"), os.getenv("GROQ_API_KEY4"), os.getenv("GROQ_API_KEY5")]
     groq_api_keys = itertools.cycle(keys)
     
-    for key in keys:
-        print(key)
+    for i,key in enumerate(keys,start=1):
+        print(f"Key {i}: {key}")
 
     current_llm = get_llm(LLMProvider.GROQ,next(groq_api_keys,None))
+    subset_quiz_responses = quiz_responses[:100]
 
-    for quiz_result in tqdm(quiz_responses, desc="Evaluating quiz responses"):
-        quiz_result["remarks"] = {}
+    for quiz_result in tqdm(subset_quiz_responses, desc="Evaluating quiz responses"):
+        if quiz_result["remarks"] is None:
+            quiz_result["remarks"] = {}
         for question in questions:
             qid = str(question["_id"])
-
+            """
             if question.get("type", "").upper() == "MCQ":
                 if qid in quiz_result["responses"]:
                     student_answers = quiz_result["responses"][qid]
@@ -125,26 +126,30 @@ async def bulk_evaluate_quiz_responses(database_url: str, quiz_id: str):
                     else:
                         mcq_score = 0
                     quiz_result["questionMarks"].update({qid: mcq_score})
-
+            """
 
             if question.get("type", "").upper() == "DESCRIPTIVE":
-                if qid in quiz_result["responses"]:
+                if qid in quiz_result["responses"]: # and qid not in quiz_result["remarks"] and quiz_result["remarks"] is not None:
                     student_answers = quiz_result["responses"][qid]
+                    current_llm = get_llm(LLMProvider.GROQ,next(groq_api_keys,None))
                     score_res = await score(
                         llm=current_llm,
                         question=question["question"],
                         student_ans=" ".join(student_answers),
                         expected_ans=" ".join(question["explanation"]),
-                        total_score= 10 #question.get("marks", 10)
+                        total_score= question.get("marks", 10),
+                        guidelines = question["guidelines"]
                     )
 
                     # Catch silent errors
                     for i in range(10):
                         if score_res["breakdown"].startswith("Error:") and score_res['rubric'].startswith("Error:"):
                             # Retry with the next API key
+                            print("Encounted Error. Retrying with a different API key with i=",i)
                             if i<5:
                                 current_llm = get_llm(LLMProvider.GROQ,next(groq_api_keys))
                             else:
+                                print("All API keys for SpecDec exhausted. Checking for Versatile")
                                 current_llm = get_llm(LLMProvider.GROQ,next(groq_api_keys,'llama-3.3-70b-versatile'))
                                 
                             score_res = await score(
@@ -152,13 +157,14 @@ async def bulk_evaluate_quiz_responses(database_url: str, quiz_id: str):
                                 question=question["question"],
                                 student_ans=" ".join(student_answers),
                                 expected_ans=" ".join(question["explanation"]),
-                                total_score= 10 #question.get("marks", 10)
+                                total_score= question.get("marks", 10),
+                                guidelines = question["guidelines"]
                             )
                         else:
                             break
                     else:
                         if score_res["breakdown"].startswith("Error:") and score_res['rubric'].startswith("Error:"):
-                            raise Exception("Failed to evaluate the response")
+                            raise Exception("Failed to evaluate the response. All API keys exhausted.")
 
                     student_score = score_res["score"]
                     reason = score_res["reason"]
@@ -166,10 +172,10 @@ async def bulk_evaluate_quiz_responses(database_url: str, quiz_id: str):
                     breakdown = score_res["breakdown"]
 
                     quiz_result["questionMarks"].update({qid: student_score})
-                    quiz_result["remarks"][qid] = f"###Reason:\n{reason}###Rubrics:\n{rubrics}###Score Breakdown\n{breakdown}"
-        quiz_result["score"] = sum(quiz_result["questionMarks"].values())
-        with open('quiz_responses_evaluated.json', 'w') as f:
-            json.dump(quiz_responses, f, indent=4)
+                    quiz_result["remarks"][qid] = f"### Reason:\n{reason}\n\n{rubrics}\n\n{breakdown}"
+            quiz_result["score"] = sum(quiz_result["questionMarks"].values())
+            with open('quiz_responses_evaluated.json', 'w') as f:
+                json.dump(subset_quiz_responses, f, indent=4)
 
 if __name__ == "__main__":
     database_url = os.getenv('COCKROACH_DB')

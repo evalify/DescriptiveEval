@@ -33,10 +33,10 @@ llm = get_llm(current_provider)
 
 # Update response schemas to include 'rubric' and 'breakdown'
 response_schemas = [
-    ResponseSchema(name="rubric", description="The evaluation rubric as a formatted string"),
-    ResponseSchema(name="breakdown", description="Detailed breakdown of the allocated marks as a formatted string"),
+    ResponseSchema(name="rubric", description="The evaluation rubric as a markdown formatted string"),
     ResponseSchema(name="score", description="The assigned score as a floating point number"),
     ResponseSchema(name="reason", description="A short and concise reason for the assigned score")
+    ResponseSchema(name="breakdown", description="Detailed breakdown of the allocated marks as a markdown formatted string"),
 ]
 
 output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
