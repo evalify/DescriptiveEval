@@ -5,13 +5,35 @@ from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 import asyncio
 from typing import Dict, List
-from model import score, LLMProvider, get_llm
+from model import score, LLMProvider, get_llm, generate_guidelines
 from pymongo import MongoClient
 import redis
 import itertools
 from tqdm import tqdm
 load_dotenv()
 redis_client = redis.StrictRedis(host='172.17.9.74', port=32768, db=2, decode_responses=True)
+
+
+async def get_guidelines(question_id:str, llm, question:str, expected_answer:str, score:int):
+    """
+    Get the guidelines for a question from the cache.
+    """
+    # cached_guidelines = redis_client.get(question_id + '_guidelines_cache')
+    # if cached_guidelines:
+        # return json.loads(cached_guidelines)
+    
+    for i in range(50):
+        guidelines = await generate_guidelines(llm, question, expected_answer, score)
+        if guidelines['guidelines'].startswith("Error:") or guidelines['guidelines'].startswith("Error processing response:"):
+            print("Error in generating guidelines. Retrying")
+            print("Guidelines:",guidelines)
+            continue
+        break
+
+    redis_client.set(question_id+'_guidelines_cache', json.dumps(guidelines), ex=3600)
+    print("Guidelines generated for", question_id)
+    print(repr(guidelines))
+    return guidelines
 
 def get_quiz_responses(database_url, quiz_id):
     """
@@ -38,7 +60,7 @@ def get_quiz_responses(database_url, quiz_id):
     "totalScore": 45.0,
     "remarks": null
   }
-    },..]
+    },...]
 
 
     Where, question_id can be matched with the questions retrived from mongo
@@ -77,16 +99,16 @@ def get_all_questions(quiz_id:str):
     collection = db['NEW_QUESTIONS']
     
     query = {"quizId": quiz_id}
-    cache = redis.get(quiz_id+'eval_cache')
-    if cache:
-        return cache
+    # cache = redis.get(quiz_id+'eval_cache')
+    # if cache:
+        # return cache
     
     new_questions = list(collection.find(query))
     
     for question in new_questions:
         question['_id'] = str(question['_id'])
 
-    redis.set(quiz_id+'eval_cache', new_questions, ex=3600)
+    # redis.set(quiz_id+'eval_cache', new_questions, ex=3600)
     return new_questions
 
 
@@ -102,14 +124,14 @@ async def bulk_evaluate_quiz_responses(database_url: str, quiz_id: str):
     with open('data/json/mongo_questions.json', 'r') as f:
         questions = json.load(f)
 
-    keys = [os.getenv("GROQ_API_KEY"), os.getenv("GROQ_API_KEY2"), os.getenv("GROQ_API_KEY3"), os.getenv("GROQ_API_KEY4"), os.getenv("GROQ_API_KEY5")]
+    keys = [os.getenv("GROQ_API_KEY3"), os.getenv("GROQ_API_KEY2"), os.getenv("GROQ_API_KEY4"), os.getenv("GROQ_API_KEY"), os.getenv("GROQ_API_KEY5")]
     groq_api_keys = itertools.cycle(keys)
     
     for i,key in enumerate(keys,start=1):
         print(f"Key {i}: {key}")
 
     current_llm = get_llm(LLMProvider.GROQ,next(groq_api_keys,None))
-    subset_quiz_responses = quiz_responses[:100]
+    subset_quiz_responses = quiz_responses
 
     for quiz_result in tqdm(subset_quiz_responses, desc="Evaluating quiz responses"):
         if quiz_result["remarks"] is None:
@@ -132,20 +154,22 @@ async def bulk_evaluate_quiz_responses(database_url: str, quiz_id: str):
                 if qid in quiz_result["responses"]: # and qid not in quiz_result["remarks"] and quiz_result["remarks"] is not None:
                     student_answers = quiz_result["responses"][qid]
                     current_llm = get_llm(LLMProvider.GROQ,next(groq_api_keys,None))
+                    # TODO: Restore -env question_guidelines = await question.get("guidelines", get_guidelines(qid, current_llm, question["question"], question["explanation"], question.get("marks", 10)))
+                    question_guidelines = question["guidelines"]
                     score_res = await score(
                         llm=current_llm,
                         question=question["question"],
                         student_ans=" ".join(student_answers),
                         expected_ans=" ".join(question["explanation"]),
                         total_score= question.get("marks", 10),
-                        guidelines = question["guidelines"]
+                        guidelines = question_guidelines
                     )
 
                     # Catch silent errors
                     for i in range(10):
                         if score_res["breakdown"].startswith("Error:") and score_res['rubric'].startswith("Error:"):
                             # Retry with the next API key
-                            print("Encounted Error. Retrying with a different API key with i=",i)
+                            print("Encountered Error. Retrying with a different API key with i=",i)
                             if i<5:
                                 current_llm = get_llm(LLMProvider.GROQ,next(groq_api_keys))
                             else:
@@ -172,15 +196,22 @@ async def bulk_evaluate_quiz_responses(database_url: str, quiz_id: str):
                     breakdown = score_res["breakdown"]
 
                     quiz_result["questionMarks"].update({qid: student_score})
-                    quiz_result["remarks"][qid] = f"### Reason:\n{reason}\n\n{rubrics}\n\n{breakdown}"
+                    quiz_result["remarks"][qid] = f"### Reason:\n{reason}\n\n{breakdown}" # {rubrics}\n\n - TODO: Removed temporarily, restore while deploying
             quiz_result["score"] = sum(quiz_result["questionMarks"].values())
-            with open('quiz_responses_evaluated.json', 'w') as f:
+            with open('data/json/quiz_responses_evaluated_LA.json', 'w') as f:
                 json.dump(subset_quiz_responses, f, indent=4)
 
 if __name__ == "__main__":
-    database_url = os.getenv('COCKROACH_DB')
-    quiz_id = "quizid123"
     # results = get_quiz_responses(database_url, quiz_id)
     # with open('quiz_responses.json', 'w') as f:
     #     json.dump(results, f, indent=4)
-    asyncio.run(bulk_evaluate_quiz_responses(database_url, quiz_id))
+    # from datetime import datetime
+    # class DateTimeEncoder(json.JSONEncoder):
+    #     def default(self, obj):
+    #         if isinstance(obj, (datetime)):
+    #             return obj.isoformat()  # Convert to ISO format
+    #         return super().default(obj)
+    # questions = get_all_questions("cm5q8fgip0004ga7azlbs71qs")
+    # with open('data/json/la_desc_questions.json', 'w') as f:
+    #     json.dump(questions, f, indent=4, cls=DateTimeEncoder)
+    asyncio.run(bulk_evaluate_quiz_responses(database_url = os.getenv('COCKROACH_DB'), quiz_id = "cm5q8fgip0004ga7azlbs71qs"))
