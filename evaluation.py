@@ -14,7 +14,7 @@ load_dotenv()
 redis_client = redis.StrictRedis(host='172.17.9.74', port=32768, db=2, decode_responses=True)
 
 
-async def get_guidelines(question_id:str, llm, question:str, expected_answer:str, score:int):
+async def get_guidelines(llm, question_id:str, question:str, expected_answer:str, score:int):
     """
     Get the guidelines for a question from the cache.
     """
@@ -196,7 +196,7 @@ async def bulk_evaluate_quiz_responses(database_url: str, quiz_id: str):
                     breakdown = score_res["breakdown"]
 
                     quiz_result["questionMarks"].update({qid: student_score})
-                    quiz_result["remarks"][qid] = f"### Reason:\n{reason}\n\n{breakdown}" # {rubrics}\n\n - TODO: Removed temporarily, restore while deploying
+                    quiz_result["remarks"][qid] = f"### Reason:\n{reason}\n\n{breakdown}{rubrics}\n\n"
             quiz_result["score"] = sum(quiz_result["questionMarks"].values())
             with open('data/json/quiz_responses_evaluated_LA.json', 'w') as f:
                 json.dump(subset_quiz_responses, f, indent=4)
