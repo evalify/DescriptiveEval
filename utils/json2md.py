@@ -1,9 +1,9 @@
-
+from evaluation_api import get_all_questions
 import json
 
-#  pandoc -s -V geometry:margin=1in --pdf-engine=xelatex -V mainfont="JetBrains Mono" -o DescEval.pdf Descriptive_Eval.md
-question_id = "677cf1760c796896725d9de9"
-with open("data/json/mongo_questions.json") as f:
+# pandoc -s -V geometry:margin=1in --pdf-engine=xelatex -V mainfont="JetBrains Mono" -o DescEval.pdf Descriptive_Eval.md
+question_id = "67809dc7af8badd513d4ae73"
+with open("../data/json/la_desc_questions.json") as f:
     questions = json.load(f)
     for i in questions:
         if i["_id"] == question_id:
@@ -12,7 +12,7 @@ with open("data/json/mongo_questions.json") as f:
             expected_answer = i["explanation"]
             break
 
-with open("data/json/quiz_responses_evaluated.json") as f:
+with open("../data/json/quiz_responses_evaluated.json") as f:
     descriptive_responses = [{
         'studentId': i["studentId"],
         'response': i["responses"][question_id][0],
@@ -44,5 +44,5 @@ def create_markdown_file(responses, output_filename):
             f.write(student['remark'].replace('\n## ','\n\n### '))
             f.write("---\n\n")
 
-create_markdown_file(descriptive_responses,"data/markdown /Descriptive_Eval.md")
+create_markdown_file(descriptive_responses, "../data/markdown/Descriptive_Eval_symmetric_all.md")
 
