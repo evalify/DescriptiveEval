@@ -3,8 +3,10 @@ from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from model import LLMProvider, get_llm, score, generate_guidelines, enhance_question_and_answer
 from typing import Optional
+from model import LLMProvider, get_llm, score, generate_guidelines, enhance_question_and_answer
+from evaluation import bulk_evaluate_quiz_responses
+from database import get_postgres_cursor, get_mongo_client
 
 app = FastAPI()
 # Store current provider in app state
@@ -43,6 +45,10 @@ class GuidelinesRequest(BaseModel):
 class QAEnhancementRequest(BaseModel):
     question: str
     expected_ans: str
+
+
+class BulkEvalRequest(BaseModel):
+    quiz_id: str
 
 
 @app.get("/")
@@ -105,6 +111,25 @@ async def enhance_qa(
         expected_ans=request.expected_ans
     )
     return result
+
+
+@app.post("/evaluate")
+async def evaluate_bulk(
+    request: BulkEvalRequest,
+):
+    cursor, conn = get_postgres_cursor()
+    mongo_db = get_mongo_client()
+    try:
+        results = await bulk_evaluate_quiz_responses(
+            request.quiz_id,
+            cursor,
+            conn,
+            mongo_db
+        )
+        return {"message": "Evaluation complete", "results": results}
+    finally:
+        cursor.close()
+        conn.close()
 
 
 if __name__ == "__main__":
