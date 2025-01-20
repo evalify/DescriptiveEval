@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from typing import Optional
 from model import LLMProvider, get_llm, score, generate_guidelines, enhance_question_and_answer
 from evaluation import bulk_evaluate_quiz_responses
-from database import get_postgres_cursor, get_mongo_client
+from database import get_postgres_cursor, get_mongo_client, get_redis_client
 
 app = FastAPI()
 # Store current provider in app state
@@ -117,19 +117,21 @@ async def enhance_qa(
 async def evaluate_bulk(
     request: BulkEvalRequest,
 ):
-    cursor, conn = get_postgres_cursor()
+    postgres_cursor, postgres_conn = get_postgres_cursor()
     mongo_db = get_mongo_client()
+    redis_client = get_redis_client()
     try:
         results = await bulk_evaluate_quiz_responses(
             request.quiz_id,
-            cursor,
-            conn,
-            mongo_db
+            postgres_cursor,
+            postgres_conn,
+            mongo_db,
+            redis_client
         )
-        return {"message": "Evaluation complete", "results": results}
+        return {"message": "Evaluation complete", "results": results} #TODO: Give more detailed response
     finally:
-        cursor.close()
-        conn.close()
+        postgres_cursor.close()
+        postgres_conn.close()
 
 
 if __name__ == "__main__":
