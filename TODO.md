@@ -15,7 +15,7 @@ Using something like CoT (increase test-time compute). Promote System 2 thinking
 (Use Reasoning models like o1?)
 
 - [x] Add pre-planning on evaluation metrics on each question
-By allowing the LLM to plan in advance on how to evaluate a equation on advance,
+By allowing the LLM to plan in advance on how to evaluate an equation in advance,
 we can get consistent scoring across different responses
 
 ## Future Considerations
@@ -24,4 +24,4 @@ we can get consistent scoring across different responses
    Ensure the Evaluator-LLM provides fair assessments by minimizing potential biases.
 
 2. Incorporate domain-specific knowledge:
-   Enhance evaluations by integrating subject matter expertise relevant to the questions.
+   Enhance evaluations by integrating subject expertise relevant to the questions.
