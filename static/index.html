@@ -1,70 +1,135 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Descriptive Answer Evaluator</title>
+    <meta name="color-scheme" content="light dark">
+    <title>DescEval - AI-Powered Descriptive Answer Evaluation</title>
     <link rel="stylesheet" href="/static/style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 </head>
 <body>
     <div class="container">
-        <h1>Descriptive Answer Evaluator🚀</h1>
-        
-        <div class="provider-selector">
-            <label id="provider-label">Select LLM Provider:</label>
-            <select id="provider" aria-labelledby="provider-label">
-                <option value="groq">Groq</option>
-                <option value="ollama">Ollama</option>
-            </select>
+        <!-- Hero Section -->
+        <div class="hero">
+            <div class="logo">DescEval</div>
+            <p>AI-powered descriptive answer evaluation for quick, accurate, and consistent grading.</p>
         </div>
 
-        <div class="content-wrapper">
-            <div class="form-section">
-                <form id="evaluationForm">
-                    <div class="form-group">
-                        <label for="question">Question (Optional):</label>
-                        <textarea id="question" rows="2"></textarea>
-                    </div>
+        <div class="tabs">
+            <button class="tab active" data-tab="score-tab">Score Answer</button>
+            <button class="tab" data-tab="guidelines-tab">Generate Guidelines</button>
+            <button class="tab" data-tab="enhance-tab">Enhance Q&A</button>
+            <button class="tab" data-tab="evaluate-tab">Bulk Evaluate</button>
+        </div>
 
-                    <div class="form-group">
-                        <label for="expected_ans">Expected Answer:</label>
-                        <textarea id="expected_ans" required rows="4"></textarea>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="student_ans">Student's Answer:</label>
-                        <textarea id="student_ans" required rows="4"></textarea>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="guidelines">Guidelines (Optional):</label>
-                        <textarea id="guidelines" rows="3"></textarea>
-                    </div>
-
-                    <div class="form-group">
-                        <label for="total_score">Total Score:</label>
-                        <input type="number" id="total_score" required min="1" value="10">
-                    </div>
-
-                    <button type="submit">Evaluate</button>
-                </form>
-            </div>
-
-            <div class="result-section">
-                <div id="result" class="result hidden">
-                    <h2>Evaluation Result</h2>
-                    <div class="score">Score: <span id="score">-</span></div>
-                    <div class="reason">Reason: <span id="reason">-</span></div>
-                    <div class="rubric">
-                        <h3>Evaluation Rubric</h3>
-                        <pre id="rubric-content">Waiting for evaluation...</pre>
-                    </div>
-                    <div class="breakdown">
-                        <h3>Score Breakdown</h3>
-                        <pre id="breakdown-content">Waiting for evaluation...</pre>
-                    </div>
+        <!-- Score Tab -->
+        <div id="score-tab" class="tab-content active">
+            <div class="content-wrapper">
+                <div class="form-section">
+                    <form id="score-form">
+                        <div class="form-group">
+                            <label for="score-question">Question</label>
+                            <textarea id="score-question" name="question" rows="2"></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="score-student-ans">Student Answer</label>
+                            <textarea id="score-student-ans" name="student_ans" rows="3" required></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="score-expected-ans">Expected Answer</label>
+                            <textarea id="score-expected-ans" name="expected_ans" rows="3" required></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="score-total">Total Score</label>
+                            <input type="number" id="score-total" name="total_score" required min="1">
+                        </div>
+                        <div class="form-group">
+                            <label for="score-guidelines">Guidelines (Optional)</label>
+                            <textarea id="score-guidelines" name="guidelines" rows="2"></textarea>
+                        </div>
+                        <button type="submit">Score Answer</button>
+                    </form>
+                </div>
+                <div class="result-section">
+                    <div id="score-loading" class="loading">Processing...</div>
+                    <pre id="score-result" class="result"></pre>
                 </div>
             </div>
+        </div>
+
+        <!-- Guidelines Tab -->
+        <div id="guidelines-tab" class="tab-content">
+            <div class="content-wrapper">
+                <div class="form-section">
+                    <form id="guidelines-form">
+                        <div class="form-group">
+                            <label for="guidelines-question">Question</label>
+                            <textarea id="guidelines-question" name="question" rows="2" required></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="guidelines-expected-ans">Expected Answer</label>
+                            <textarea id="guidelines-expected-ans" name="expected_ans" rows="3" required></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="guidelines-total">Total Score</label>
+                            <input type="number" id="guidelines-total" name="total_score" value="10">
+                        </div>
+                        <button type="submit">Generate Guidelines</button>
+                    </form>
+                </div>
+                <div class="result-section">
+                    <div id="generate-guidelines-loading" class="loading">Processing...</div>
+                    <pre id="generate-guidelines-result" class="result"></pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Enhance Tab -->
+        <div id="enhance-tab" class="tab-content">
+            <div class="content-wrapper">
+                <div class="form-section">
+                    <form id="enhance-form">
+                        <div class="form-group">
+                            <label for="enhance-question">Question</label>
+                            <textarea id="enhance-question" name="question" rows="2" required></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="enhance-expected-ans">Expected Answer</label>
+                            <textarea id="enhance-expected-ans" name="expected_ans" rows="3" required></textarea>
+                        </div>
+                        <button type="submit">Enhance Q&A</button>
+                    </form>
+                </div>
+                <div class="result-section">
+                    <div id="enhance-qa-loading" class="loading">Processing...</div>
+                    <pre id="enhance-qa-result" class="result"></pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Evaluate Tab -->
+        <div id="evaluate-tab" class="tab-content">
+            <div class="content-wrapper">
+                <div class="form-section">
+                    <form id="evaluate-form">
+                        <div class="form-group">
+                            <label for="evaluate-quiz-id">Quiz ID</label>
+                            <input type="text" id="evaluate-quiz-id" name="quiz_id" required>
+                        </div>
+                        <button type="submit">Evaluate Quiz</button>
+                    </form>
+                </div>
+                <div class="result-section">
+                    <div id="evaluate-loading" class="loading">Processing...</div>
+                    <pre id="evaluate-result" class="result"></pre>
+                </div>
+            </div>
+        </div>
+
+        <div class="footer">
+            Made by Evalify Team
         </div>
     </div>
     <script src="/static/script.js"></script>
