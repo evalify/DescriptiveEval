@@ -13,26 +13,27 @@ from tqdm import tqdm
 load_dotenv()
 redis_client = redis.StrictRedis(host='172.17.9.74', port=32768, db=2, decode_responses=True)
 
+CACHE_EX = 3600 # Cache expiry time in seconds
 
-async def get_guidelines(llm, question_id:str, question:str, expected_answer:str, score:int):
+async def get_guidelines(llm, question_id:str, question:str, expected_answer:str, total_score:int):
     """
     Get the guidelines for a question from the cache.
     """
-    # cached_guidelines = redis_client.get(question_id + '_guidelines_cache')
-    # if cached_guidelines:
-        # return json.loads(cached_guidelines)
-    
-    for i in range(50):
-        guidelines = await generate_guidelines(llm, question, expected_answer, score)
+    cached_guidelines = redis_client.get(question_id + '_guidelines_cache')
+    if cached_guidelines:
+        return json.loads(cached_guidelines)
+    guidelines = None
+    for i in range(10):
+        guidelines = await generate_guidelines(llm, question, expected_answer, total_score)
         if guidelines['guidelines'].startswith("Error:") or guidelines['guidelines'].startswith("Error processing response:"):
             print("Error in generating guidelines. Retrying")
             print("Guidelines:",guidelines)
             continue
         break
-
-    redis_client.set(question_id+'_guidelines_cache', json.dumps(guidelines), ex=3600)
-    print("Guidelines generated for", question_id)
-    print(repr(guidelines))
+    if guidelines is not None:
+        redis_client.set(question_id+'_guidelines_cache', json.dumps(guidelines), ex=CACHE_EX)
+        print("Guidelines generated for", question_id)
+        print(repr(guidelines))
     return guidelines
 
 def get_quiz_responses(database_url, quiz_id):
@@ -67,6 +68,10 @@ def get_quiz_responses(database_url, quiz_id):
     :param database_url: The URL for the database connection.
     :param quiz_id: The ID of the quiz to retrieve responses for.
     """
+
+    cached_responses = redis_client.get(quiz_id+'_responses_evalcache')
+    if cached_responses:
+        return json.loads(cached_responses)
     if 'pool_max' in database_url:
         database_url = database_url.replace('&pool_max=50', '')
     
@@ -86,43 +91,42 @@ def get_quiz_responses(database_url, quiz_id):
 
     cursor.close()
     connection.close()
-
+    redis_client.set(f'{quiz_id}_responses_evalcache', json.dumps(quiz_responses), ex=CACHE_EX)
     return quiz_responses
 
 def get_all_questions(quiz_id:str):
     """
     Get all questions for a quiz based on the quiz ID from the MongoDB database.
     """
+    cached_questions = redis_client.get(quiz_id+'_questions_evalcache')
+    if cached_questions:
+        return json.loads(cached_questions)
+
     client = MongoClient(os.getenv("MONGODB_URI"))
     
     db = client["Evalify"]
     collection = db['NEW_QUESTIONS']
     
     query = {"quizId": quiz_id}
-    # cache = redis.get(quiz_id+'eval_cache')
-    # if cache:
-        # return cache
-    
-    new_questions = list(collection.find(query))
-    
-    for question in new_questions:
+    questions = list(collection.find(query))
+    for question in questions:
         question['_id'] = str(question['_id'])
 
-    # redis.set(quiz_id+'eval_cache', new_questions, ex=3600)
-    return new_questions
+    redis_client.set(f'{quiz_id}_questions_evalcache', json.dumps(questions), ex=CACHE_EX)
+    return questions
 
 
 async def bulk_evaluate_quiz_responses(database_url: str, quiz_id: str):
     """
     Evaluate all responses for a quiz with rubric caching and parallel processing.
     """
-    # quiz_responses = get_quiz_responses(database_url, quiz_id)
-    # questions = get_all_questions(quiz_id)
+    quiz_responses = get_quiz_responses(database_url, quiz_id)
+    questions = get_all_questions(quiz_id)
 
-    with open('data/json/quiz_responses.json', 'r') as f:
-        quiz_responses = json.load(f)
-    with open('data/json/mongo_questions.json', 'r') as f:
-        questions = json.load(f)
+    # with open('data/json/quiz_responses.json', 'r') as f:
+    #     quiz_responses = json.load(f)
+    # with open('data/json/mongo_questions.json', 'r') as f:
+    #     questions = json.load(f)
 
     keys = [os.getenv("GROQ_API_KEY3"), os.getenv("GROQ_API_KEY2"), os.getenv("GROQ_API_KEY4"), os.getenv("GROQ_API_KEY"), os.getenv("GROQ_API_KEY5")]
     groq_api_keys = itertools.cycle(keys)
@@ -130,7 +134,6 @@ async def bulk_evaluate_quiz_responses(database_url: str, quiz_id: str):
     for i,key in enumerate(keys,start=1):
         print(f"Key {i}: {key}")
 
-    current_llm = get_llm(LLMProvider.GROQ,next(groq_api_keys,None))
     subset_quiz_responses = quiz_responses
 
     for quiz_result in tqdm(subset_quiz_responses, desc="Evaluating quiz responses"):
