@@ -18,7 +18,13 @@ class LLMProvider(Enum):
 
 
 def get_llm(provider: LLMProvider = LLMProvider.GROQ, api_key=None, model_name=None):
-    """Get an LLM instance with the specified provider"""
+    """
+    Get an LLM instance with the specified provider
+
+    :param provider: The LLM provider to use
+    :param api_key: The API key for the provider (optional)
+    :param model_name: The model name for the provider (optional)
+    """
     if provider == LLMProvider.OLLAMA:
         return OllamaLLM(model=model_name if model_name else "llama3.3")
     elif provider == LLMProvider.GROQ:
@@ -32,6 +38,16 @@ def get_llm(provider: LLMProvider = LLMProvider.GROQ, api_key=None, model_name=N
 
 
 async def score(llm, student_ans, expected_ans, total_score, question=None, guidelines=None):
+    """
+    Evaluate a student's answer based on the expected answer and guidelines.
+
+    :param llm: The LLM instance to use for scoring
+    :param student_ans: The student's answer to evaluate
+    :param expected_ans: The expected answer for comparison
+    :param total_score: The total score to evaluate against
+    :param question: The question (optional)
+    :param guidelines: The evaluation guidelines and criteria (optional)
+    """
     if not expected_ans or expected_ans.strip() == "" or total_score < 1:
         return {
             "score": 0.0,
@@ -103,7 +119,15 @@ async def score(llm, student_ans, expected_ans, total_score, question=None, guid
         }
 
 
-async def generate_guidelines(llm, question: str, expected_ans: str, total_score: int = 10) -> dict:
+async def generate_guidelines(llm, question: str, expected_ans: str, total_score: int = 5) -> dict:
+    """
+    Generate evaluation guidelines and criteria for a given question and expected answer.
+
+    :param llm: The LLM instance to use for generating guidelines
+    :param question: The question to evaluate
+    :param expected_ans: The expected answer for comparison
+    :param total_score: The total score to evaluate against
+    """
     if not question or not expected_ans:
         return {
             "guidelines": "Provide a question and expected answer to generate evaluation rubric/guidelines",
@@ -146,6 +170,13 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
 
 
 async def enhance_question_and_answer(llm, question: str, expected_ans: str) -> dict:
+    """
+    Enhance the question and expected answer to be clear, concise, and direct.
+
+    :param llm: The LLM instance to use for enhancing the content
+    :param question: The question to enhance
+    :param expected_ans: The expected answer to enhance
+    """
     if not question or not expected_ans:
         return {
             "enhanced_question": "Provide a question and expected answer to enhance the content",
