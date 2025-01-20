@@ -7,12 +7,12 @@ from model import score, LLMProvider, get_llm, generate_guidelines
 import redis
 import itertools
 from tqdm import tqdm
-load_dotenv()
-redis_client = redis.StrictRedis(host='172.17.9.74', port=32768, db=2, decode_responses=True)
+from redis import Redis
 
+load_dotenv()
 CACHE_EX = 3600 # Cache expiry time in seconds
 
-async def get_guidelines(llm, question_id:str, question:str, expected_answer:str, total_score:int):
+async def get_guidelines(redis_client: Redis, llm, question_id:str, question:str, expected_answer:str, total_score:int):
     """
     Get the guidelines for a question from the cache.
     """
@@ -33,7 +33,7 @@ async def get_guidelines(llm, question_id:str, question:str, expected_answer:str
         print(repr(guidelines))
     return guidelines
 
-def get_quiz_responses(cursor, quiz_id: str):
+def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str):
     """
     Get all responses for a quiz based on the quiz ID from the Cockroach database.
 
@@ -82,7 +82,7 @@ def get_quiz_responses(cursor, quiz_id: str):
     redis_client.set(f'{quiz_id}_responses_evalcache', json.dumps(quiz_responses), ex=CACHE_EX)
     return quiz_responses
 
-def get_all_questions(mongo_db, quiz_id: str):
+def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str):
     """
     Get all questions for a quiz from MongoDB
     :param mongo_db: The MongoDB database object i.e, client[db]
@@ -102,7 +102,7 @@ def get_all_questions(mongo_db, quiz_id: str):
     redis_client.set(f'{quiz_id}_questions_evalcache', json.dumps(questions), ex=CACHE_EX)
     return questions
 
-async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db):
+async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db, redis_client: Redis):
     """
     Evaluate all responses for a quiz with rubric caching and parallel processing.
 
@@ -111,8 +111,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     :param pg_conn: PostgreSQL connection from database.get_postgres_cursor()
     :param mongo_db: MongoDB database from database.get_mongo_client()
     """
-    quiz_responses = get_quiz_responses(pg_cursor, quiz_id)
-    questions = get_all_questions(mongo_db, quiz_id)
+    quiz_responses = get_quiz_responses(pg_cursor, redis_client, quiz_id)
+    questions = get_all_questions(mongo_db, redis_client, quiz_id)
     
     keys = [os.getenv("GROQ_API_KEY3"), os.getenv("GROQ_API_KEY2"), os.getenv("GROQ_API_KEY4"), os.getenv("GROQ_API_KEY"), os.getenv("GROQ_API_KEY5")]
     groq_api_keys = itertools.cycle(keys)

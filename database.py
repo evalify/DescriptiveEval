@@ -3,10 +3,12 @@ import psycopg2
 from psycopg2.extras import RealDictCursor
 from pymongo import MongoClient
 from dotenv import load_dotenv
+import redis
 # For Type Hinting
 from typing import Tuple
 from pymongo.database import Database
 from psycopg2.extensions import connection as postgres_connection
+from redis import Redis
 
 load_dotenv()
 
@@ -19,3 +21,12 @@ def get_postgres_cursor() -> Tuple[RealDictCursor, postgres_connection]:
 def get_mongo_client() -> Database:
     client = MongoClient(os.getenv("MONGODB_URI"))
     return client["Evalify"]
+
+
+def get_redis_client() -> Redis:
+    return redis.StrictRedis(
+        host=os.getenv('REDIS_HOST', '172.17.9.74'),
+        port=int(os.getenv('REDIS_PORT', 32768)),
+        db=int(os.getenv('REDIS_DB', 2)),
+        decode_responses=True
+    )
