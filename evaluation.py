@@ -1,12 +1,9 @@
 import os
-import psycopg2
 import json
-from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 import asyncio
 from typing import Dict, List
 from model import score, LLMProvider, get_llm, generate_guidelines
-from pymongo import MongoClient
 import redis
 import itertools
 from tqdm import tqdm
@@ -36,7 +33,7 @@ async def get_guidelines(llm, question_id:str, question:str, expected_answer:str
         print(repr(guidelines))
     return guidelines
 
-def get_quiz_responses(database_url, quiz_id):
+def get_quiz_responses(cursor, quiz_id: str):
     """
     Get all responses for a quiz based on the quiz ID from the Cockroach database.
 
@@ -63,71 +60,60 @@ def get_quiz_responses(database_url, quiz_id):
   }
     },...]
 
-
     Where, question_id can be matched with the questions retrived from mongo
-    :param database_url: The URL for the database connection.
-    :param quiz_id: The ID of the quiz to retrieve responses for.
-    """
 
+    :param cursor: PostgresSQL cursor for database operations
+    :param quiz_id: The ID of the quiz to retrieve responses for
+    """
     cached_responses = redis_client.get(quiz_id+'_responses_evalcache')
     if cached_responses:
         return json.loads(cached_responses)
-    if 'pool_max' in database_url:
-        database_url = database_url.replace('&pool_max=50', '')
     
-    connection = psycopg2.connect(database_url)
-    cursor = connection.cursor(cursor_factory=RealDictCursor)
-
     query = """
-        SELECT * FROM "QuizResult" WHERE "quizId" = '{}';
-    """.format(quiz_id)
-    
-    cursor.execute(query)
+        SELECT * FROM "QuizResult" WHERE "quizId" = %s;
+    """
+    cursor.execute(query, (quiz_id,))
     quiz_responses = cursor.fetchall()
 
     for response in quiz_responses:
         response['id'] = str(response['id'])
         response['submittedAt'] = str(response['submittedAt'])
 
-    cursor.close()
-    connection.close()
     redis_client.set(f'{quiz_id}_responses_evalcache', json.dumps(quiz_responses), ex=CACHE_EX)
     return quiz_responses
 
-def get_all_questions(quiz_id:str):
+def get_all_questions(mongo_db, quiz_id: str):
     """
-    Get all questions for a quiz based on the quiz ID from the MongoDB database.
+    Get all questions for a quiz from MongoDB
+    :param mongo_db: The MongoDB database object i.e, client[db]
+    :param quiz_id: The ID of the quiz to retrieve questions for
     """
     cached_questions = redis_client.get(quiz_id+'_questions_evalcache')
     if cached_questions:
         return json.loads(cached_questions)
-
-    client = MongoClient(os.getenv("MONGODB_URI"))
     
-    db = client["Evalify"]
-    collection = db['NEW_QUESTIONS']
-    
+    collection = mongo_db['NEW_QUESTIONS']
     query = {"quizId": quiz_id}
     questions = list(collection.find(query))
+    
     for question in questions:
         question['_id'] = str(question['_id'])
 
     redis_client.set(f'{quiz_id}_questions_evalcache', json.dumps(questions), ex=CACHE_EX)
     return questions
 
-
-async def bulk_evaluate_quiz_responses(database_url: str, quiz_id: str):
+async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db):
     """
     Evaluate all responses for a quiz with rubric caching and parallel processing.
+
+    :param quiz_id: The ID of the quiz to evaluate
+    :param pg_cursor: PostgreSQL cursor from database.get_postgres_cursor()
+    :param pg_conn: PostgreSQL connection from database.get_postgres_cursor()
+    :param mongo_db: MongoDB database from database.get_mongo_client()
     """
-    quiz_responses = get_quiz_responses(database_url, quiz_id)
-    questions = get_all_questions(quiz_id)
-
-    # with open('data/json/quiz_responses.json', 'r') as f:
-    #     quiz_responses = json.load(f)
-    # with open('data/json/mongo_questions.json', 'r') as f:
-    #     questions = json.load(f)
-
+    quiz_responses = get_quiz_responses(pg_cursor, quiz_id)
+    questions = get_all_questions(mongo_db, quiz_id)
+    
     keys = [os.getenv("GROQ_API_KEY3"), os.getenv("GROQ_API_KEY2"), os.getenv("GROQ_API_KEY4"), os.getenv("GROQ_API_KEY"), os.getenv("GROQ_API_KEY5")]
     groq_api_keys = itertools.cycle(keys)
     
@@ -201,8 +187,24 @@ async def bulk_evaluate_quiz_responses(database_url: str, quiz_id: str):
                     quiz_result["questionMarks"].update({qid: student_score})
                     quiz_result["remarks"][qid] = f"### Reason:\n{reason}\n\n{breakdown}{rubrics}\n\n"
             quiz_result["score"] = sum(quiz_result["questionMarks"].values())
-            with open('data/json/quiz_responses_evaluated_LA.json', 'w') as f:
-                json.dump(subset_quiz_responses, f, indent=4)
+            try:
+                with open('data/json/quiz_responses_evaluated_LA.json', 'w') as f:
+                    json.dump(subset_quiz_responses, f, indent=4)
+            except IOError as e:
+                print(f"Error writing to file: {e}")
+
+    # Save results back to database
+    # for result in quiz_responses:
+    #     pg_cursor.execute(
+    #         """UPDATE "QuizResult" 
+    #            SET "score" = %s, "remarks" = %s, "questionMarks" = %s 
+    #            WHERE "id" = %s""",
+    #         (result["score"], json.dumps(result["remarks"]), 
+    #          json.dumps(result["questionMarks"]), result["id"])
+    #     )
+    # pg_conn.commit()
+    
+    return quiz_responses
 
 if __name__ == "__main__":
     # results = get_quiz_responses(database_url, quiz_id)
