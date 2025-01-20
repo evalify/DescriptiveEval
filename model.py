@@ -17,7 +17,8 @@ class LLMProvider(Enum):
     GROQ = "groq"
 
 
-def get_llm(provider: LLMProvider = LLMProvider.OLLAMA, api_key=None, model_name=None):
+def get_llm(provider: LLMProvider = LLMProvider.GROQ, api_key=None, model_name=None):
+    """Get an LLM instance with the specified provider"""
     if provider == LLMProvider.OLLAMA:
         return OllamaLLM(model=model_name if model_name else "llama3.3")
     elif provider == LLMProvider.GROQ:
@@ -28,18 +29,6 @@ def get_llm(provider: LLMProvider = LLMProvider.OLLAMA, api_key=None, model_name
         )
     else:
         raise ValueError(f"Unsupported LLM provider: {provider}")
-
-
-# Initialize default LLM
-current_provider = LLMProvider.GROQ  # Change to LLMProvider.OLLAMA if desired
-llm = get_llm(current_provider)
-
-
-def set_llm_provider(provider: LLMProvider):
-    global llm, current_provider
-    current_provider = provider
-    llm = get_llm(provider)
-    return llm
 
 
 async def score(llm, student_ans, expected_ans, total_score, question=None, guidelines=None):

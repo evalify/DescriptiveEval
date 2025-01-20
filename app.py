@@ -1,12 +1,14 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Depends
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
-from model import llm, LLMProvider, set_llm_provider, score, generate_guidelines, enhance_question_and_answer
+from model import LLMProvider, get_llm, score, generate_guidelines, enhance_question_and_answer
 from typing import Optional
 
 app = FastAPI()
+# Store current provider in app state
+app.state.current_provider = LLMProvider.GROQ
 
 # Mount static files directory
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -48,19 +50,25 @@ async def read_index():
     return FileResponse('static/index.html')
 
 
+def get_llm_dependency():
+    """Dependency to provide LLM instance based on current provider"""
+    return get_llm(provider=app.state.current_provider)
+
 @app.post("/set-provider")
-async def change_provider(request: ProviderRequest):  # TODO: Fix - Can't change provider
+async def change_provider(request: ProviderRequest):
     try:
         provider = LLMProvider(request.provider.lower())
-        set_llm_provider(provider)
-        print(llm.__repr_name__())
+        # Update the app state
+        app.state.current_provider = provider
         return {"message": f"Successfully switched to {provider.value}"}
     except ValueError as e:
         return {"error": str(e)}
 
-
 @app.post("/score")
-async def get_response(request: QueryRequest):
+async def get_response(
+    request: QueryRequest,
+    llm = Depends(get_llm_dependency)
+):
     result = await score(
         llm=llm,
         student_ans=request.student_ans,
@@ -73,7 +81,10 @@ async def get_response(request: QueryRequest):
 
 
 @app.post("/generate-guidelines")
-async def generate_guidelines_api(request: GuidelinesRequest):
+async def generate_guidelines_api(
+    request: GuidelinesRequest,
+    llm = Depends(get_llm_dependency)
+):
     guidelines_result = await generate_guidelines(
         llm,
         question=request.question or "",
@@ -84,7 +95,10 @@ async def generate_guidelines_api(request: GuidelinesRequest):
 
 
 @app.post("/enhance-qa")
-async def enhance_qa(request: QAEnhancementRequest):
+async def enhance_qa(
+    request: QAEnhancementRequest,
+    llm = Depends(get_llm_dependency)
+):
     result = await enhance_question_and_answer(
         llm,
         question=request.question,
