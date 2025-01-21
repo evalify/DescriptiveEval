@@ -24,11 +24,35 @@ sys.path.append(str(Path(__file__).parent.parent))
 import pytest
 from httpx import AsyncClient
 from app import app
+import subprocess
+
+
+@pytest.fixture(scope="session", autouse=True)
+def start_server():
+    # Start the FastAPI server
+    process = subprocess.Popen(["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "4040"])
+    import requests
+    import time
+
+    timeout = 30
+    start_time = time.time()
+    while True:
+        try:
+            response = requests.get("http://localhost:4040")
+            if response.status_code == 200:
+                break
+        except requests.ConnectionError:
+            pass
+        if time.time() - start_time > timeout:
+            raise RuntimeError("Server did not start within the timeout period")
+        time.sleep(1)
+    yield
+    process.terminate()  # Terminate the server after tests are done
 
 
 @pytest.fixture
 async def client():
-    async with AsyncClient(app=app, base_url="http://test") as ac:
+    async with AsyncClient(base_url="http://localhost:4040") as ac:
         yield ac
 
 
