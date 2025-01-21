@@ -1,8 +1,9 @@
 import json
 import pytest
-from model import get_llm, LLMProvider, score
+from model import get_llm, LLMProvider, score, generate_guidelines, enhance_question_and_answer
 from utils.logger import log_evaluation
 
+DEFAULT_PROVIDER = LLMProvider.GROQ
 
 def print_result(test_name, result):
     print(f"\n=== {test_name} Output ===")
@@ -13,13 +14,13 @@ def print_result(test_name, result):
 
 def test_llm_provider_switching():
     ollama_llm = get_llm(LLMProvider.OLLAMA)
-    groq_llm = get_llm(LLMProvider.GROQ)
+    groq_llm = get_llm(DEFAULT_PROVIDER)
     assert ollama_llm != groq_llm
 
 
 @pytest.mark.asyncio
 async def test_score_calculation():
-    llm = get_llm(LLMProvider.GROQ)
+    llm = get_llm(DEFAULT_PROVIDER)
     params = {
         "student_ans": "Photosynthesis is the process where plants convert sunlight into energy.",
         "expected_ans": "Photosynthesis is the process by which plants convert light energy into chemical energy to produce glucose using carbon dioxide and water.",
@@ -35,7 +36,7 @@ async def test_score_calculation():
 
 @pytest.mark.asyncio
 async def test_invalid_inputs():
-    llm = get_llm(LLMProvider.GROQ)
+    llm = get_llm(DEFAULT_PROVIDER)
     params = {
         "student_ans": "",
         "expected_ans": "",
@@ -50,7 +51,7 @@ async def test_invalid_inputs():
 
 @pytest.mark.asyncio
 async def test_score_with_question():
-    llm = get_llm(LLMProvider.GROQ)
+    llm = get_llm(DEFAULT_PROVIDER)
     params = {
         "question": "Explain the process of photosynthesis.",
         "student_ans": "Photosynthesis is the process where plants convert sunlight into energy.",
@@ -67,7 +68,7 @@ async def test_score_with_question():
 
 @pytest.mark.asyncio
 async def test_score_with_guidelines():
-    llm = get_llm(LLMProvider.GROQ)
+    llm = get_llm(DEFAULT_PROVIDER)
     params = {
         "question": "Explain the process of photosynthesis.",
         "guidelines": "Evaluate based on: 1) Understanding of energy conversion 2) Mention of required materials 3) Accuracy of process description",
@@ -85,7 +86,7 @@ async def test_score_with_guidelines():
 
 @pytest.mark.asyncio
 async def test_score_with_question_and_guidelines():
-    llm = get_llm(LLMProvider.GROQ)
+    llm = get_llm(DEFAULT_PROVIDER)
     params = {
         "question": "Explain the process of photosynthesis.",
         "guidelines": "Focus on accuracy and completeness of the explanation.",
@@ -103,7 +104,7 @@ async def test_score_with_question_and_guidelines():
 
 @pytest.mark.asyncio
 async def test_rubic_and_breakdown():
-    llm = get_llm(LLMProvider.GROQ)
+    llm = get_llm(DEFAULT_PROVIDER)
     params = {
         "question": "Explain the process of photosynthesis.",
         "guidelines": "Focus on accuracy and completeness of the explanation.",
@@ -123,3 +124,54 @@ async def test_rubic_and_breakdown():
     assert isinstance(result["breakdown"], str)
     assert len(result["rubric"]) > 0
     assert len(result["breakdown"]) > 0
+
+
+@pytest.mark.asyncio
+async def test_generate_guidelines():
+    llm = get_llm(DEFAULT_PROVIDER)
+    params = {
+        "question": "Explain the process of photosynthesis.",
+        "expected_ans": "Photosynthesis is the process by which plants convert light energy into chemical energy to produce glucose using carbon dioxide and water."
+    }
+    result = await generate_guidelines(llm=llm, **params)
+    assert isinstance(result.get('guidelines'), str)
+    assert len(result) > 0
+
+@pytest.mark.asyncio
+async def test_enhance_question_and_answer():
+    llm = get_llm(DEFAULT_PROVIDER)
+    params = {
+        "question": "Explain the process of photosynthesis.",
+        "expected_ans": "Photosynthesis is the process where plants convert sunlight into energy."
+    }
+    result = await enhance_question_and_answer(llm=llm, **params)
+    assert isinstance(result, dict)
+    assert "enhanced_question" in result
+    assert "enhanced_expected_ans" in result
+
+def test_invalid_provider():
+    with pytest.raises(ValueError):
+        get_llm("INVALID_PROVIDER")
+
+@pytest.mark.asyncio
+async def test_empty_guidelines_generation():
+    llm = get_llm(DEFAULT_PROVIDER)
+    params = {
+        "question": "",
+        "expected_ans": ""
+    }
+    result = await generate_guidelines(llm=llm, **params)
+    assert result.get('guidelines').startswith("Error:")
+
+@pytest.mark.asyncio
+async def test_edge_cases_score():
+    llm = get_llm(DEFAULT_PROVIDER)
+    params = {
+        "student_ans": "A" * 10000,  # Extremely long answer
+        "expected_ans": "Photosynthesis is the process by which plants convert light energy into chemical energy to produce glucose using carbon dioxide and water.",
+        "total_score": 10
+    }
+    result = await score(llm=llm, **params)
+    assert isinstance(result["score"], float)
+    assert isinstance(result["reason"], str)
+    assert 0 <= result["score"] <= 10

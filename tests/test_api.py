@@ -231,3 +231,139 @@ async def test_concurrent_vs_sequential_scoring(client, sample_answer):
     
     # Verify concurrent execution was faster
     assert concurrent_time < sequential_time, "Concurrent execution should be faster than sequential"
+
+
+@pytest.mark.asyncio
+async def test_generate_guidelines_endpoint(client: AsyncClient):
+    """Test the /generate-guidelines endpoint"""
+    request_data = {
+        "question": "Explain the process of photosynthesis.",
+        "expected_ans": "Photosynthesis is the process by which plants convert light energy into chemical energy.",
+        "total_score": 10
+    }
+    response = await client.post("/generate-guidelines", json=request_data)
+    assert response.status_code == 200
+    result = response.json()
+    assert "guidelines" in result
+
+
+@pytest.mark.asyncio
+async def test_enhance_qa_endpoint(client: AsyncClient):
+    """Test the /enhance-qa endpoint"""
+    request_data = {
+        "question": "What is photosynthesis?",
+        "expected_ans": "Process where plants make food"
+    }
+    response = await client.post("/enhance-qa", json=request_data)
+    assert response.status_code == 200
+    result = response.json()
+    assert "enhanced_question" in result
+    assert "enhanced_expected_ans" in result
+
+
+@pytest.mark.asyncio
+async def test_evaluate_endpoint(client: AsyncClient):
+    """Test the /evaluate endpoint for bulk evaluation"""
+    request_data = {
+        "quiz_id": "test_quiz_id"
+    }
+    response = await client.post("/evaluate", json=request_data)
+    assert response.status_code == 200
+    result = response.json()
+    assert "message" in result
+    assert "results" in result
+
+
+@pytest.mark.asyncio
+async def test_invalid_quiz_id(client: AsyncClient):
+    """Test bulk evaluation with invalid quiz ID"""
+    request_data = {
+        "quiz_id": "invalid_quiz_id"
+    }
+    response = await client.post("/evaluate", json=request_data)
+    assert response.status_code == 200
+    # Even with invalid quiz ID, the endpoint should return a valid response format
+    result = response.json()
+    assert "message" in result
+    assert "results" in result
+
+
+@pytest.mark.asyncio
+async def test_empty_quiz(client: AsyncClient):
+    """Test bulk evaluation with empty quiz"""
+    request_data = {
+        "quiz_id": ""
+    }
+    response = await client.post("/evaluate", json=request_data)
+    assert response.status_code == 200
+    result = response.json()
+    assert "message" in result
+    assert "results" in result
+
+
+@pytest.mark.asyncio
+async def test_score_endpoint(client: AsyncClient):
+    """Test the /score endpoint"""
+    request_data = {
+        "question": "Explain photosynthesis.",
+        "student_ans": "Plants convert sunlight to energy.",
+        "expected_ans": "Photosynthesis is the process where plants convert sunlight into chemical energy.",
+        "total_score": 10,
+        "guidelines": "Focus on accuracy and completeness."
+    }
+    response = await client.post("/score", json=request_data)
+    assert response.status_code == 200
+    result = response.json()
+    assert "score" in result
+    assert "reason" in result
+    assert "rubric" in result
+    assert "breakdown" in result
+
+@pytest.mark.asyncio
+async def test_root_endpoint(client: AsyncClient):
+    """Test the root endpoint"""
+    response = await client.get("/")
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_score_invalid_input(client: AsyncClient):
+    """Test the /score endpoint with invalid input"""
+    request_data = {
+        "student_ans": "",
+        "expected_ans": "",
+        "total_score": -1
+    }
+    response = await client.post("/score", json=request_data)
+    assert response.status_code == 200
+    result = response.json()
+    assert result["score"] == 0
+    assert isinstance(result["reason"], str)
+
+
+@pytest.mark.asyncio
+async def test_enhance_qa_empty_input(client: AsyncClient):
+    """Test the /enhance-qa endpoint with empty input"""
+    request_data = {
+        "question": "",
+        "expected_ans": ""
+    }
+    response = await client.post("/enhance-qa", json=request_data)
+    assert response.status_code == 200
+    result = response.json()
+    assert "enhanced_question" in result
+    assert "enhanced_expected_ans" in result
+
+
+@pytest.mark.asyncio
+async def test_guidelines_empty_input(client: AsyncClient):
+    """Test the /generate-guidelines endpoint with empty input"""
+    request_data = {
+        "question": "",
+        "expected_ans": "",
+        "total_score": 10
+    }
+    response = await client.post("/generate-guidelines", json=request_data)
+    assert response.status_code == 200
+    result = response.json()
+    assert "guidelines" in result
