@@ -17,9 +17,9 @@ from model import score, LLMProvider, get_llm, generate_guidelines
 import itertools
 from tqdm import tqdm
 from redis import Redis
-
+from utils.misc import DateTimeEncoder
 load_dotenv()
-CACHE_EX = 3600  # Cache expiry time in seconds
+CACHE_EX = int(os.getenv('CACHE_EXPIRY', 3600))  # Cache expiry time in seconds
 
 
 async def get_guidelines(redis_client: Redis, llm, question_id: str, question: str, expected_answer: str,
@@ -115,11 +115,11 @@ def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str):
     for question in questions:
         question['_id'] = str(question['_id'])
 
-    redis_client.set(f'{quiz_id}_questions_evalcache', json.dumps(questions), ex=CACHE_EX)
+    redis_client.set(f'{quiz_id}_questions_evalcache', json.dumps(questions, cls=DateTimeEncoder), ex=CACHE_EX)
     return questions
 
 
-async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db, redis_client: Redis):
+async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db, redis_client: Redis): #TODO: Handle Errors
     """
     Evaluate all responses for a quiz with rubric caching and parallel processing.
 
@@ -228,29 +228,29 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
 
 if __name__ == "__main__":
-    # results = get_quiz_responses(database_url, quiz_id)
-    # with open('quiz_responses.json', 'w') as f:
-    #     json.dump(results, f, indent=4)
-    # from datetime import datetime
-    # class DateTimeEncoder(json.JSONEncoder):
-    #     def default(self, obj):
-    #         if isinstance(obj, (datetime)):
-    #             return obj.isoformat()  # Convert to ISO format
-    #         return super().default(obj)
-    # questions = get_all_questions("cm5q8fgip0004ga7azlbs71qs")
-    # with open('data/json/la_desc_questions.json', 'w') as f:
-    #     json.dump(questions, f, indent=4, cls=DateTimeEncoder)
+    from datetime import datetime
+    
+
     from database import get_postgres_cursor, get_mongo_client, get_redis_client
 
     my_pg_cursor, my_pg_conn = get_postgres_cursor()
     my_mongo_db = get_mongo_client()
     my_redis_client = get_redis_client()
 
-    my_quiz_id = "cm5q8fgip0004ga7azlbs71qs"
-    asyncio.run(bulk_evaluate_quiz_responses(
-        quiz_id=my_quiz_id,
-        pg_cursor=my_pg_cursor,
-        pg_conn=my_pg_conn,
-        mongo_db=my_mongo_db,
-        redis_client=my_redis_client)
-    )
+    my_quiz_id = "cm64n3edl0006xyrxnp4llbe4"
+    # asyncio.run(bulk_evaluate_quiz_responses(
+    #     quiz_id=my_quiz_id,
+    #     pg_cursor=my_pg_cursor,
+    #     pg_conn=my_pg_conn,
+    #     mongo_db=my_mongo_db,
+    #     redis_client=my_redis_client)
+    # )
+    
+    # Get quiz results
+    # results = get_quiz_responses(my_pg_cursor, my_redis_client, my_quiz_id)
+    # with open('data/json/quiz_responses_quiz3.json', 'w') as f:
+    #     json.dump(results, f, indent=4)
+    # Get all questions
+    questions = get_all_questions(my_mongo_db, my_redis_client, my_quiz_id)
+    with open('data/json/quiz_questions_quiz3.json', 'w') as f:
+        json.dump(questions, f, indent=4, cls=DateTimeEncoder)

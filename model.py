@@ -51,7 +51,7 @@ async def score(llm, student_ans, expected_ans, total_score, question=None, guid
     if not expected_ans or expected_ans.strip() == "" or total_score < 1:
         return {
             "score": 0.0,
-            "reason": f"Invalid input parameters: expected_ans='{expected_ans}', total_score='{total_score}'",
+            "reason": f"Error: Invalid input parameters: expected_ans='{expected_ans}', total_score='{total_score}'",
             "rubric": "No rubric available",
             "breakdown": "No breakdown available"
         }
@@ -59,7 +59,7 @@ async def score(llm, student_ans, expected_ans, total_score, question=None, guid
     if not student_ans or student_ans.strip() == "":
         return {
             "score": 0.0,
-            "reason": "Student answer is empty or missing",
+            "reason": "Error: Student answer is empty or missing",
             "rubric": "No rubric available",
             "breakdown": "No breakdown available"
         }
@@ -115,7 +115,7 @@ async def score(llm, student_ans, expected_ans, total_score, question=None, guid
             "rubric": "Error: Could not generate rubric",
             "breakdown": "Error: Could not generate breakdown",
             "score": 0.0,
-            "reason": f"Error processing response: {str(e)}"
+            "reason": f"Error: Error processing response: {str(e)}"
         }
 
 
@@ -130,7 +130,7 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
     """
     if not question or not expected_ans:
         return {
-            "guidelines": "Provide a question and expected answer to generate evaluation rubric/guidelines",
+            "guidelines": "Error: Provide a question and expected answer to generate evaluation rubric/guidelines",
         }
 
     # Define response schema for guidelines
@@ -165,7 +165,7 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
         }
     except Exception as e:
         return {
-            "guidelines": f"Error processing response: {str(e)}"
+            "guidelines": f"Error: Error processing response: {str(e)}"
         }
 
 
@@ -217,6 +217,6 @@ async def enhance_question_and_answer(llm, question: str, expected_ans: str) -> 
         }
     except Exception as e:
         return {
-            "enhanced_question": f"Error processing response: {str(e)}",
-            "enhanced_expected_ans": f"Error processing response: {str(e)}"
+            "enhanced_question": f"Error: Error processing response: {str(e)}",
+            "enhanced_expected_ans": f"Error: Error processing response: {str(e)}"
         }
