@@ -48,7 +48,7 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
     return guidelines
 
 
-def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str):
+def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=False):
     """
     Get all responses for a quiz based on the quiz ID from the Cockroach database.
 
@@ -80,9 +80,11 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str):
     :param cursor: PostgresSQL cursor for database operations
     :param redis_client: Redis client for caching
     :param quiz_id: The ID of the quiz to retrieve responses for
+    :param save_to_file: Save the responses to a file (default: False)
     """
     cached_responses = redis_client.get(quiz_id + '_responses_evalcache')
     if cached_responses:
+        print("Responses Cache hit!")
         return json.loads(cached_responses)
 
     query = """
@@ -96,18 +98,28 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str):
         response['submittedAt'] = str(response['submittedAt'])
 
     redis_client.set(f'{quiz_id}_responses_evalcache', json.dumps(quiz_responses), ex=CACHE_EX)
+
+    if save_to_file:
+        try:
+            with open(f'data/json/quiz_responses_{quiz_id}.json', 'w') as f:
+                json.dump(quiz_responses, f, indent=4)
+        except IOError as e:
+            print(f"Error writing to file: {e}")
+
     return quiz_responses
 
 
-def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str):
+def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=False):
     """
     Get all questions for a quiz from MongoDB
     :param mongo_db: The MongoDB database object i.e, client[db]
     :param redis_client: Redis client for caching
     :param quiz_id: The ID of the quiz to retrieve questions for
+    :param save_to_file: Save the questions to a file (default: False)
     """
     cached_questions = redis_client.get(quiz_id + '_questions_evalcache')
     if cached_questions:
+        print("Questions Cache hit!")
         return json.loads(cached_questions)
 
     collection = mongo_db['NEW_QUESTIONS']
@@ -118,11 +130,18 @@ def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str):
         question['_id'] = str(question['_id'])
 
     redis_client.set(f'{quiz_id}_questions_evalcache', json.dumps(questions, cls=DateTimeEncoder), ex=CACHE_EX)
+
+    if save_to_file:
+        try:
+            with open(f'data/json/quiz_questions_{quiz_id}.json', 'w') as f:
+                json.dump(questions, f, indent=4, cls=DateTimeEncoder)
+        except IOError as e:
+            print(f"Error writing to file: {e}")
     return questions
 
 
 async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db,
-                                       redis_client: Redis):  # TODO: Handle Errors
+                                       redis_client: Redis, save_to_file=False):  # TODO: Handle Errors
     """
     Evaluate all responses for a quiz with rubric caching and parallel processing.
 
@@ -131,9 +150,12 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     :param pg_conn: PostgresSQL connection from database.get_postgres_cursor() - for updating the database with results
     :param mongo_db: MongoDB database from database.get_mongo_client() - for getting questions
     :param redis_client: Redis client from database.get_redis_client() - for caching
+    :param save_to_file: Save the evaluated responses to a file (default: False)
     """
-    quiz_responses = get_quiz_responses(cursor=pg_cursor, redis_client=redis_client, quiz_id=quiz_id)
-    questions = get_all_questions(mongo_db=mongo_db, redis_client=redis_client, quiz_id=quiz_id)
+    quiz_responses = get_quiz_responses(cursor=pg_cursor, redis_client=redis_client, quiz_id=quiz_id,
+                                        save_to_file=save_to_file)
+    questions = get_all_questions(mongo_db=mongo_db, redis_client=redis_client, quiz_id=quiz_id,
+                                  save_to_file=save_to_file)
 
     keys = [os.getenv("GROQ_API_KEY3"), os.getenv("GROQ_API_KEY2"), os.getenv("GROQ_API_KEY4"),
             os.getenv("GROQ_API_KEY"), os.getenv("GROQ_API_KEY5")]
@@ -142,17 +164,17 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     for i, key in enumerate(keys, start=1):
         print(f"Key {i}: {key}")
 
-    subset_quiz_responses = quiz_responses
-
-    for quiz_result in tqdm(subset_quiz_responses, desc="Evaluating quiz responses"):
+    for quiz_result in tqdm(quiz_responses, desc="Evaluating quiz responses"):
         if quiz_result["remarks"] is None:
             quiz_result["remarks"] = {}
+        if quiz_result["questionMarks"] is None:
+            quiz_result["questionMarks"] = {}
 
         for question in questions:
             qid = str(question["_id"])
 
-            if qid not in quiz_result[
-                "responses"]:  # and not (qid not in quiz_result["remarks"] and quiz_result["remarks"] is not None):
+            if qid not in quiz_result["responses"]:
+                # and not (qid not in quiz_result["remarks"] and quiz_result["remarks"] is not None):
                 continue
 
             if question.get("type", "").upper() == "MCQ":
@@ -168,9 +190,12 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 student_answers = quiz_result["responses"][qid]
                 current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, None))
                 question_guidelines = await question.get("guidelines",
-                                                         get_guidelines(qid, current_llm, question["question"],
-                                                                        question["explanation"],
-                                                                        question.get("marks", 10)))
+                                                         get_guidelines(redis_client=redis_client,
+                                                                        question_id=qid,
+                                                                        llm=current_llm,
+                                                                        question=question["question"],
+                                                                        expected_answer=question["explanation"],
+                                                                        total_score=question.get("marks", 5)))
                 score_res = await score(
                     llm=current_llm,
                     question=question["question"],
@@ -206,7 +231,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
                 quiz_result["questionMarks"].update({qid: score_res["score"]})
                 quiz_result["remarks"][
-                    qid] = f"### Reason:\n{score_res["reason"]}\n\n{score_res["breakdown"]}{score_res["rubric"]}\n\n"
+                    qid] = f"### Reason:\n{score_res['reason']}\n\n{score_res['breakdown']}{score_res['rubric']}\n\n"
 
             elif question.get("type", "").upper() == "CODING":
                 response = quiz_result["responses"][qid]
@@ -227,12 +252,14 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                     tf_score = 0
                 quiz_result["questionMarks"].update({qid: tf_score})
 
-            quiz_result["score"] = sum(
-                quiz_result["questionMarks"].values())  # Calculate total score TODO: Move this out of the second loop
-            # Write evaluated responses to file everytime a response is evaluated
+        # Calculate total score
+        quiz_result["score"] = sum(quiz_result["questionMarks"].values())
+        print(f"Score for {quiz_result['studentId']}: {quiz_result['score']}")
+        # Write evaluated responses to file everytime a response is evaluated
+        if save_to_file:
             try:
-                with open('data/json/quiz_responses_evaluated_LA.json', 'w') as f:
-                    json.dump(subset_quiz_responses, f, indent=4)
+                with open(f'data/json/quiz_responses_evaluated_{quiz_id}.json', 'w') as f:
+                    json.dump(quiz_responses, f, indent=4)
             except IOError as e:
                 print(f"Error writing to file: {e}")
 
@@ -258,20 +285,23 @@ if __name__ == "__main__":
     my_redis_client = get_redis_client()
 
     my_quiz_id = "cm64n3edl0006xyrxnp4llbe4"
-    # asyncio.run(bulk_evaluate_quiz_responses(
-    #     quiz_id=my_quiz_id,
-    #     pg_cursor=my_pg_cursor,
-    #     pg_conn=my_pg_conn,
-    #     mongo_db=my_mongo_db,
-    #     redis_client=my_redis_client)
-    # )
+
+    # Evaluate quiz responses
+    asyncio.run(bulk_evaluate_quiz_responses(
+        quiz_id=my_quiz_id,
+        pg_cursor=my_pg_cursor,
+        pg_conn=my_pg_conn,
+        mongo_db=my_mongo_db,
+        redis_client=my_redis_client,
+        save_to_file=True)
+    )
 
     # Get quiz results
     # my_results = get_quiz_responses(my_pg_cursor, my_redis_client, my_quiz_id)
     # with open('data/json/quiz_responses_quiz3.json', 'w') as f:
     #     json.dump(my_results, f, indent=4)
-    
+
     # Get all questions
-    my_questions = get_all_questions(my_mongo_db, my_redis_client, my_quiz_id)
-    with open('data/json/quiz_questions_quiz3.json', 'w') as f:
-        json.dump(my_questions, f, indent=4, cls=DateTimeEncoder)
+    # my_questions = get_all_questions(my_mongo_db, my_redis_client, my_quiz_id)
+    # with open('data/json/quiz_questions_quiz3.json', 'w') as f:
+    #     json.dump(my_questions, f, indent=4, cls=DateTimeEncoder)
