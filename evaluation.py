@@ -18,6 +18,8 @@ import itertools
 from tqdm import tqdm
 from redis import Redis
 from utils.misc import DateTimeEncoder
+from utils.code_eval import evaluate_coding_question
+
 load_dotenv()
 CACHE_EX = int(os.getenv('CACHE_EXPIRY', 3600))  # Cache expiry time in seconds
 
@@ -119,7 +121,8 @@ def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str):
     return questions
 
 
-async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db, redis_client: Redis): #TODO: Handle Errors
+async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db,
+                                       redis_client: Redis):  # TODO: Handle Errors
     """
     Evaluate all responses for a quiz with rubric caching and parallel processing.
 
@@ -144,69 +147,89 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     for quiz_result in tqdm(subset_quiz_responses, desc="Evaluating quiz responses"):
         if quiz_result["remarks"] is None:
             quiz_result["remarks"] = {}
+
         for question in questions:
             qid = str(question["_id"])
-            """
+
+            if qid not in quiz_result[
+                "responses"]:  # and not (qid not in quiz_result["remarks"] and quiz_result["remarks"] is not None):
+                continue
+
             if question.get("type", "").upper() == "MCQ":
-                if qid in quiz_result["responses"]:
-                    student_answers = quiz_result["responses"][qid]
-                    correct_answers = question["answer"]
-                    if set(student_answers) == set(correct_answers):
-                        mcq_score = question.get("marks", 1)
-                    else:
-                        mcq_score = 0
-                    quiz_result["questionMarks"].update({qid: mcq_score})
-            """
+                student_answers = quiz_result["responses"][qid]
+                correct_answers = question["answer"]
+                if set(student_answers) == set(correct_answers):
+                    mcq_score = question.get("marks", 1)
+                else:
+                    mcq_score = 0
+                quiz_result["questionMarks"].update({qid: mcq_score})
 
-            if question.get("type", "").upper() == "DESCRIPTIVE":
-                if qid in quiz_result[
-                    "responses"]:  # and qid not in quiz_result["remarks"] and quiz_result["remarks"] is not None:
-                    student_answers = quiz_result["responses"][qid]
-                    current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, None))
-                    # TODO: Restore -env question_guidelines = await question.get("guidelines", get_guidelines(qid, current_llm, question["question"], question["explanation"], question.get("marks", 10)))
-                    question_guidelines = question["guidelines"]
-                    score_res = await score(
-                        llm=current_llm,
-                        question=question["question"],
-                        student_ans=" ".join(student_answers),
-                        expected_ans=" ".join(question["explanation"]),
-                        total_score=question.get("marks", 10),
-                        guidelines=question_guidelines
-                    )
+            elif question.get("type", "").upper() == "DESCRIPTIVE":
+                student_answers = quiz_result["responses"][qid]
+                current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, None))
+                question_guidelines = await question.get("guidelines",
+                                                         get_guidelines(qid, current_llm, question["question"],
+                                                                        question["explanation"],
+                                                                        question.get("marks", 10)))
+                score_res = await score(
+                    llm=current_llm,
+                    question=question["question"],
+                    student_ans=" ".join(student_answers),  # TODO: What the...? Why are we joining the answers?
+                    expected_ans=" ".join(question["explanation"]),
+                    total_score=question.get("marks", 10),
+                    guidelines=question_guidelines
+                )
 
-                    # Catch silent errors
-                    for i in range(10):
-                        if score_res["breakdown"].startswith("Error:") and score_res['rubric'].startswith("Error:"):
-                            # Retry with the next API key
-                            print("Encountered Error. Retrying with a different API key with i=", i)
-                            if i < 5:
-                                current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys))
-                            else:
-                                print("All API keys for SpecDec exhausted. Checking for Versatile")
-                                current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, 'llama-3.3-70b-versatile'))
-
-                            score_res = await score(
-                                llm=current_llm,
-                                question=question["question"],
-                                student_ans=" ".join(student_answers),
-                                expected_ans=" ".join(question["explanation"]),
-                                total_score=question.get("marks", 10),
-                                guidelines=question["guidelines"]
-                            )
+                # Catch silent errors
+                for i in range(10):
+                    if score_res["breakdown"].startswith("Error:") and score_res['rubric'].startswith("Error:"):
+                        print("Encountered Error. Retrying with a different API key with i=", i)
+                        if i < 5:
+                            current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys))
                         else:
-                            break
+                            print("All API keys for SpecDec exhausted. Checking for Versatile")
+                            current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, 'llama-3.3-70b-versatile'))
+
+                        score_res = await score(
+                            llm=current_llm,
+                            question=question["question"],
+                            student_ans=" ".join(student_answers),
+                            expected_ans=" ".join(question["explanation"]),
+                            total_score=question.get("marks", 10),
+                            guidelines=question["guidelines"]
+                        )
                     else:
-                        if score_res["breakdown"].startswith("Error:") and score_res['rubric'].startswith("Error:"):
-                            raise Exception("Failed to evaluate the response. All API keys exhausted.")
+                        break
+                else:
+                    if score_res["breakdown"].startswith("Error:") and score_res['rubric'].startswith("Error:"):
+                        raise Exception("Failed to evaluate the response. All API keys exhausted.")
 
-                    student_score = score_res["score"]
-                    reason = score_res["reason"]
-                    rubrics = score_res["rubric"]
-                    breakdown = score_res["breakdown"]
+                quiz_result["questionMarks"].update({qid: score_res["score"]})
+                quiz_result["remarks"][
+                    qid] = f"### Reason:\n{score_res["reason"]}\n\n{score_res["breakdown"]}{score_res["rubric"]}\n\n"
 
-                    quiz_result["questionMarks"].update({qid: student_score})
-                    quiz_result["remarks"][qid] = f"### Reason:\n{reason}\n\n{breakdown}{rubrics}\n\n"
-            quiz_result["score"] = sum(quiz_result["questionMarks"].values())
+            elif question.get("type", "").upper() == "CODING":
+                response = quiz_result["responses"][qid]
+                driver_code = question["driverCode"]
+                coding_score, _ = evaluate_coding_question(
+                    student_response=response[0],
+                    driver_code=driver_code,
+                    test_cases_count=len(question.get("testcases"))
+                )
+                quiz_result["questionMarks"].update({qid: coding_score})
+
+            elif question.get("type", "").upper() == "TRUE_FALSE":
+                response = quiz_result["responses"][qid]
+                correct_answer = question["answer"]
+                if response[0] == correct_answer:
+                    tf_score = question.get("marks", 1)
+                else:
+                    tf_score = 0
+                quiz_result["questionMarks"].update({qid: tf_score})
+
+            quiz_result["score"] = sum(
+                quiz_result["questionMarks"].values())  # Calculate total score TODO: Move this out of the second loop
+            # Write evaluated responses to file everytime a response is evaluated
             try:
                 with open('data/json/quiz_responses_evaluated_LA.json', 'w') as f:
                     json.dump(subset_quiz_responses, f, indent=4)
@@ -224,13 +247,10 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     #     )
     # pg_conn.commit()
 
-    return quiz_responses #TODO: Update return message to be more meaningful
+    return quiz_responses  # TODO: Update return message to be more meaningful
 
 
 if __name__ == "__main__":
-    from datetime import datetime
-    
-
     from database import get_postgres_cursor, get_mongo_client, get_redis_client
 
     my_pg_cursor, my_pg_conn = get_postgres_cursor()
@@ -245,12 +265,13 @@ if __name__ == "__main__":
     #     mongo_db=my_mongo_db,
     #     redis_client=my_redis_client)
     # )
-    
+
     # Get quiz results
-    # results = get_quiz_responses(my_pg_cursor, my_redis_client, my_quiz_id)
+    # my_results = get_quiz_responses(my_pg_cursor, my_redis_client, my_quiz_id)
     # with open('data/json/quiz_responses_quiz3.json', 'w') as f:
-    #     json.dump(results, f, indent=4)
+    #     json.dump(my_results, f, indent=4)
+    
     # Get all questions
-    questions = get_all_questions(my_mongo_db, my_redis_client, my_quiz_id)
+    my_questions = get_all_questions(my_mongo_db, my_redis_client, my_quiz_id)
     with open('data/json/quiz_questions_quiz3.json', 'w') as f:
-        json.dump(questions, f, indent=4, cls=DateTimeEncoder)
+        json.dump(my_questions, f, indent=4, cls=DateTimeEncoder)
