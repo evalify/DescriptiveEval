@@ -1,11 +1,7 @@
 import json
 import pytest
-from model import LLMProvider
 from utils.logger import log_evaluation
 from httpx import AsyncClient
-from app import app
-from httpx import AsyncClient
-from app import app
 import asyncio
 import time
 
