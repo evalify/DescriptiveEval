@@ -18,6 +18,7 @@ import itertools
 from tqdm import tqdm
 from redis import Redis
 from utils.misc import DateTimeEncoder, remove_html_tags
+from utils.misc import DateTimeEncoder, remove_html_tags
 from utils.code_eval import evaluate_coding_question
 
 load_dotenv()
@@ -48,6 +49,7 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
     return guidelines
 
 
+def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=True):
 def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=True):
     """
     Get all responses for a quiz based on the quiz ID from the Cockroach database.
@@ -81,6 +83,7 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
     :param redis_client: Redis client for caching
     :param quiz_id: The ID of the quiz to retrieve responses for
     :param save_to_file: Save the responses to a file (default: True)
+    :param save_to_file: Save the responses to a file (default: True)
     """
     cached_responses = redis_client.get(quiz_id + '_responses_evalcache')
     if cached_responses:
@@ -110,11 +113,13 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
 
 
 def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=True):
+def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=True):
     """
     Get all questions for a quiz from MongoDB
     :param mongo_db: The MongoDB database object i.e, client[db]
     :param redis_client: Redis client for caching
     :param quiz_id: The ID of the quiz to retrieve questions for
+    :param save_to_file: Save the questions to a file (default: True)
     :param save_to_file: Save the questions to a file (default: True)
     """
     cached_questions = redis_client.get(quiz_id + '_questions_evalcache')
@@ -142,6 +147,7 @@ def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=
 
 async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db,
                                        redis_client: Redis, save_to_file=True):  # TODO: Handle Errors
+                                       redis_client: Redis, save_to_file=True):  # TODO: Handle Errors
     """
     Evaluate all responses for a quiz with rubric caching and parallel processing.
 
@@ -150,6 +156,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     :param pg_conn: PostgresSQL connection from database.get_postgres_cursor() - for updating the database with results
     :param mongo_db: MongoDB database from database.get_mongo_client() - for getting questions
     :param redis_client: Redis client from database.get_redis_client() - for caching
+    :param save_to_file: Save the evaluated responses to a file (default: True)
     :param save_to_file: Save the evaluated responses to a file (default: True)
     """
     quiz_responses = get_quiz_responses(cursor=pg_cursor, redis_client=redis_client, quiz_id=quiz_id,
@@ -170,6 +177,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         if quiz_result["questionMarks"] is None:
             quiz_result["questionMarks"] = {}
         quiz_result["totalScore"] = 0
+        quiz_result["totalScore"] = 0
         for question in questions:
             qid = str(question["_id"])
 
@@ -181,10 +189,12 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 student_answers = quiz_result["responses"][qid]
                 correct_answers = question["answer"]
                 if set(student_answers) == set(correct_answers): #TODO: Check if this is the correct way to compare
+                if set(student_answers) == set(correct_answers): #TODO: Check if this is the correct way to compare
                     mcq_score = question.get("marks", 1)
                 else:
                     mcq_score = 0
                 quiz_result["questionMarks"].update({qid: mcq_score})
+                quiz_result["totalScore"] += mcq_score
                 quiz_result["totalScore"] += mcq_score
 
             elif question.get("type", "").upper() == "DESCRIPTIVE":
@@ -234,6 +244,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 quiz_result["questionMarks"].update({qid: score_res["score"]})
                 quiz_result["totalScore"] += score_res["score"]
 
+                quiz_result["totalScore"] += score_res["score"]
+
                 quiz_result["remarks"][
                     qid] = f"### Reason:\n{score_res['reason']}\n\n{score_res['breakdown']}{score_res['rubric']}\n\n"
 
@@ -247,6 +259,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 )
                 quiz_result["questionMarks"].update({qid: coding_score})
                 quiz_result["totalScore"] += coding_score
+                quiz_result["totalScore"] += coding_score
 
             elif question.get("type", "").upper() == "TRUE_FALSE":
                 response = quiz_result["responses"][qid]
@@ -256,6 +269,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 else:
                     tf_score = 0
                 quiz_result["questionMarks"].update({qid: tf_score})
+                quiz_result["totalScore"] += tf_score
                 quiz_result["totalScore"] += tf_score
 
         # Calculate total score
