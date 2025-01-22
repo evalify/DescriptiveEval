@@ -167,96 +167,95 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
     for i, key in enumerate(keys, start=1):
         print(f"Key {i}: {key}")
+    try:
+        for quiz_result in tqdm(quiz_responses, desc="Evaluating quiz responses"):
+            if quiz_result["remarks"] is None:       quiz_result["remarks"] = {}
+            if quiz_result["questionMarks"] is None: quiz_result["questionMarks"] = {}
+            quiz_result["totalScore"] = 0
 
-    for quiz_result in tqdm(quiz_responses, desc="Evaluating quiz responses"):
-        if quiz_result["remarks"] is None:
-            quiz_result["remarks"] = {}
-        if quiz_result["questionMarks"] is None:
-            quiz_result["questionMarks"] = {}
-        quiz_result["totalScore"] = 0
-        for question in questions:
-            qid = str(question["_id"])
-            
-            quiz_result["totalScore"] += question.get("marks", 1) # TODO: Is this correct?
-            if qid not in quiz_result["responses"]:
-                # and not (qid not in quiz_result["remarks"] and quiz_result["remarks"] is not None):
-                continue
+            for question in questions:
+                qid = str(question["_id"])
+                
+                quiz_result["totalScore"] += question.get("marks", 1) # TODO: Is this correct?
+                if qid not in quiz_result["responses"]:
+                    # and not (qid not in quiz_result["remarks"] and quiz_result["remarks"] is not None):
+                    continue
+                
+                match question.get("type", "").upper():
+                    case "MCQ":
+                        student_answers = quiz_result["responses"][qid]
+                        correct_answers = question["answer"]
+                        mcq_score = await evaluate_mcq(student_answers, correct_answers, question.get("marks", 1))
+                        quiz_result["questionMarks"].update({qid: mcq_score})
 
-            if question.get("type", "").upper() == "MCQ":
-                student_answers = quiz_result["responses"][qid]
-                correct_answers = question["answer"]
-                mcq_score = await evaluate_mcq(student_answers, correct_answers, question.get("marks", 1))
-                quiz_result["questionMarks"].update({qid: mcq_score})
-
-            elif question.get("type", "").upper() == "DESCRIPTIVE":
-                clean_question = remove_html_tags(question['question']).strip()
-                student_answers = quiz_result["responses"][qid]
-                current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, None))
-                question_guidelines = await question.get("guidelines",
-                                                         get_guidelines(redis_client=redis_client,
+                    case "DESCRIPTIVE":
+                        clean_question = remove_html_tags(question['question']).strip()
+                        student_answers = quiz_result["responses"][qid]
+                        current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, None))
+                        question_guidelines = await question.get("guidelines",
+                                                        get_guidelines(redis_client=redis_client,
                                                                         question_id=qid,
                                                                         llm=current_llm,
                                                                         question=clean_question,
                                                                         expected_answer=question["explanation"],
                                                                         total_score=question.get("marks", 5)))
-                score_res = await score(
-                    llm=current_llm,
-                    question=clean_question,
-                    student_ans=" ".join(student_answers),  # TODO: What the...? Why are we joining the answers?
-                    expected_ans=" ".join(question["explanation"]),
-                    total_score=question.get("marks", 10),
-                    guidelines=question_guidelines
-                )
-
-                # Catch silent errors
-                for i in range(10):
-                    if score_res["breakdown"].startswith("Error:") and score_res['rubric'].startswith("Error:"):
-                        print("Encountered Error. Retrying with a different API key with i=", i)
-                        if i < 5:
-                            current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys))
-                        else:
-                            print("All API keys for SpecDec exhausted. Checking for Versatile")
-                            current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, 'llama-3.3-70b-versatile'))
-
                         score_res = await score(
                             llm=current_llm,
                             question=clean_question,
-                            student_ans=" ".join(student_answers),
+                            student_ans=" ".join(student_answers),  # TODO: What the...? Why are we joining the answers?
                             expected_ans=" ".join(question["explanation"]),
                             total_score=question.get("marks", 10),
-                            guidelines=question["guidelines"]
+                            guidelines=question_guidelines
                         )
-                    else:
-                        break
-                else:
-                    if score_res["breakdown"].startswith("Error:") and score_res['rubric'].startswith("Error:"):
-                        raise Exception("Failed to evaluate the response. All API keys exhausted.")
 
-                quiz_result["questionMarks"].update({qid: score_res["score"]})
+                        # Catch silent errors
+                        for i in range(10):
+                            if score_res["breakdown"].startswith("Error:") and score_res['rubric'].startswith("Error:"):
+                                print("Encountered Error. Retrying with a different API key with i=", i)
+                                if i < 5:
+                                    current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys))
+                                else:
+                                    print("All API keys for SpecDec exhausted. Checking for Versatile")
+                                    current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, 'llama-3.3-70b-versatile'))
 
-                quiz_result["remarks"][
-                    qid] = f"### Reason:\n{score_res['reason']}\n\n{score_res['breakdown']}{score_res['rubric']}\n\n"
+                                score_res = await score(
+                                    llm=current_llm,
+                                    question=clean_question,
+                                    student_ans=" ".join(student_answers),
+                                    expected_ans=" ".join(question["explanation"]),
+                                    total_score=question.get("marks", 10),
+                                    guidelines=question["guidelines"]
+                                )
+                            else:
+                                break
+                        else:
+                            if score_res["breakdown"].startswith("Error:") and score_res['rubric'].startswith("Error:"):
+                                raise Exception("Failed to evaluate the response. All API keys exhausted.")
 
-            elif question.get("type", "").upper() == "CODING":
-                response = quiz_result["responses"][qid]
-                driver_code = question["driverCode"]
-                coding_score, _ = await evaluate_coding_question(
-                    student_response=response[0],
-                    driver_code=driver_code,
-                    test_cases_count=len(question.get("testcases"))
-                )
-                quiz_result["questionMarks"].update({qid: coding_score})
+                        quiz_result["questionMarks"].update({qid: score_res["score"]})
+                        quiz_result["remarks"][qid] = f"### Reason:\n{score_res['reason']}\n\n{score_res['breakdown']}{score_res['rubric']}\n\n"
 
-            elif question.get("type", "").upper() == "TRUE_FALSE":
-                response = quiz_result["responses"][qid][0]
-                correct_answer = question["answer"]
-                tf_score = await evaluate_true_false(response, correct_answer, question.get("marks", 1))
-                quiz_result["questionMarks"].update({qid: tf_score})
+                    case "CODING":
+                        response = quiz_result["responses"][qid]
+                        driver_code = question["driverCode"]
+                        coding_score, _ = await evaluate_coding_question(
+                            student_response=response[0],
+                            driver_code=driver_code,
+                            test_cases_count=len(question.get("testcases"))
+                        )
+                        quiz_result["questionMarks"].update({qid: coding_score})
 
-        # Calculate total score
-        quiz_result["score"] = sum(quiz_result["questionMarks"].values())
-        # print(f"Score for {quiz_result['studentId']}: {quiz_result['score']}")
-        # Write evaluated responses to file everytime a response is evaluated
+                    case "TRUE_FALSE":
+                        response = quiz_result["responses"][qid][0]
+                        correct_answer = question["answer"]
+                        tf_score = await evaluate_true_false(response, correct_answer, question.get("marks", 1))
+                        quiz_result["questionMarks"].update({qid: tf_score})
+
+            # Calculate total score
+            quiz_result["score"] = sum(quiz_result["questionMarks"].values())
+            # print(f"Score for {quiz_result['studentId']}: {quiz_result['score']}")
+            # Write evaluated responses to file everytime a response is evaluated
+    finally:
         if save_to_file:
             try:
                 with open(f'data/json/quiz_responses_evaluated_{quiz_id}.json', 'w') as f:
