@@ -10,16 +10,16 @@ Functions:
 
 import os
 import json
-from dotenv import load_dotenv
 import asyncio
+import itertools 
 from typing import Dict, List
-from model import score, LLMProvider, get_llm, generate_guidelines
-import itertools
+from dotenv import load_dotenv
 from tqdm import tqdm
 from redis import Redis
-from utils.misc import DateTimeEncoder, remove_html_tags
+from model import score, LLMProvider, get_llm, generate_guidelines
 from utils.misc import DateTimeEncoder, remove_html_tags
 from utils.code_eval import evaluate_coding_question
+from utils.static_eval import evaluate_mcq, evaluate_true_false
 
 load_dotenv()
 CACHE_EX = int(os.getenv('CACHE_EXPIRY', 3600))  # Cache expiry time in seconds
@@ -176,7 +176,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         quiz_result["totalScore"] = 0
         for question in questions:
             qid = str(question["_id"])
-
+            
+            quiz_result["totalScore"] += question.get("marks", 1) # TODO: Is this correct?
             if qid not in quiz_result["responses"]:
                 # and not (qid not in quiz_result["remarks"] and quiz_result["remarks"] is not None):
                 continue
@@ -184,12 +185,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             if question.get("type", "").upper() == "MCQ":
                 student_answers = quiz_result["responses"][qid]
                 correct_answers = question["answer"]
-                if set(student_answers) == set(correct_answers): #TODO: Check if this is the correct way to compare
-                    mcq_score = question.get("marks", 1)
-                else:
-                    mcq_score = 0
+                mcq_score = await evaluate_mcq(student_answers, correct_answers, question.get("marks", 1))
                 quiz_result["questionMarks"].update({qid: mcq_score})
-                quiz_result["totalScore"] += mcq_score
 
             elif question.get("type", "").upper() == "DESCRIPTIVE":
                 clean_question = remove_html_tags(question['question']).strip()
@@ -236,7 +233,6 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         raise Exception("Failed to evaluate the response. All API keys exhausted.")
 
                 quiz_result["questionMarks"].update({qid: score_res["score"]})
-                quiz_result["totalScore"] += score_res["score"]
 
                 quiz_result["remarks"][
                     qid] = f"### Reason:\n{score_res['reason']}\n\n{score_res['breakdown']}{score_res['rubric']}\n\n"
@@ -244,23 +240,18 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             elif question.get("type", "").upper() == "CODING":
                 response = quiz_result["responses"][qid]
                 driver_code = question["driverCode"]
-                coding_score, _ = evaluate_coding_question(
+                coding_score, _ = await evaluate_coding_question(
                     student_response=response[0],
                     driver_code=driver_code,
                     test_cases_count=len(question.get("testcases"))
                 )
                 quiz_result["questionMarks"].update({qid: coding_score})
-                quiz_result["totalScore"] += coding_score
 
             elif question.get("type", "").upper() == "TRUE_FALSE":
-                response = quiz_result["responses"][qid]
+                response = quiz_result["responses"][qid][0]
                 correct_answer = question["answer"]
-                if response[0] == correct_answer:
-                    tf_score = question.get("marks", 1)
-                else:
-                    tf_score = 0
+                tf_score = await evaluate_true_false(response, correct_answer, question.get("marks", 1))
                 quiz_result["questionMarks"].update({qid: tf_score})
-                quiz_result["totalScore"] += tf_score
 
         # Calculate total score
         quiz_result["score"] = sum(quiz_result["questionMarks"].values())
