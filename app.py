@@ -63,7 +63,7 @@ def get_llm_dependency():
 @app.post("/set-provider")
 async def change_provider(request: ProviderRequest):
     try:
-        provider = LLMProvider(request.provider.lower())
+        provider = LLMProvider(request.provider.lower())    #TODO: Add model_name and api_key support
         # Update the app state
         app.state.current_provider = provider
         return {"message": f"Successfully switched to {provider.value}"}
@@ -126,7 +126,8 @@ async def evaluate_bulk(
             postgres_cursor,
             postgres_conn,
             mongo_db,
-            redis_client
+            redis_client,
+            save_to_file=True
         )
         return {"message": "Evaluation complete", "results": results} #TODO: Give more detailed response
     finally:
