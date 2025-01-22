@@ -174,7 +174,6 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         if quiz_result["questionMarks"] is None:
             quiz_result["questionMarks"] = {}
         quiz_result["totalScore"] = 0
-        quiz_result["totalScore"] = 0
         for question in questions:
             qid = str(question["_id"])
 
@@ -190,7 +189,6 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 else:
                     mcq_score = 0
                 quiz_result["questionMarks"].update({qid: mcq_score})
-                quiz_result["totalScore"] += mcq_score
                 quiz_result["totalScore"] += mcq_score
 
             elif question.get("type", "").upper() == "DESCRIPTIVE":
@@ -240,8 +238,6 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 quiz_result["questionMarks"].update({qid: score_res["score"]})
                 quiz_result["totalScore"] += score_res["score"]
 
-                quiz_result["totalScore"] += score_res["score"]
-
                 quiz_result["remarks"][
                     qid] = f"### Reason:\n{score_res['reason']}\n\n{score_res['breakdown']}{score_res['rubric']}\n\n"
 
@@ -255,7 +251,6 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 )
                 quiz_result["questionMarks"].update({qid: coding_score})
                 quiz_result["totalScore"] += coding_score
-                quiz_result["totalScore"] += coding_score
 
             elif question.get("type", "").upper() == "TRUE_FALSE":
                 response = quiz_result["responses"][qid]
@@ -265,7 +260,6 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 else:
                     tf_score = 0
                 quiz_result["questionMarks"].update({qid: tf_score})
-                quiz_result["totalScore"] += tf_score
                 quiz_result["totalScore"] += tf_score
 
         # Calculate total score
