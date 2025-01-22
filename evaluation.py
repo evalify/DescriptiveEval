@@ -50,7 +50,6 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
 
 
 def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=True):
-def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=True):
     """
     Get all responses for a quiz based on the quiz ID from the Cockroach database.
 
@@ -113,7 +112,6 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
 
 
 def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=True):
-def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=True):
     """
     Get all questions for a quiz from MongoDB
     :param mongo_db: The MongoDB database object i.e, client[db]
@@ -146,7 +144,6 @@ def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=
 
 
 async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db,
-                                       redis_client: Redis, save_to_file=True):  # TODO: Handle Errors
                                        redis_client: Redis, save_to_file=True):  # TODO: Handle Errors
     """
     Evaluate all responses for a quiz with rubric caching and parallel processing.
@@ -188,7 +185,6 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             if question.get("type", "").upper() == "MCQ":
                 student_answers = quiz_result["responses"][qid]
                 correct_answers = question["answer"]
-                if set(student_answers) == set(correct_answers): #TODO: Check if this is the correct way to compare
                 if set(student_answers) == set(correct_answers): #TODO: Check if this is the correct way to compare
                     mcq_score = question.get("marks", 1)
                 else:
