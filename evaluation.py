@@ -34,7 +34,7 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
     if cached_guidelines:
         return json.loads(cached_guidelines)
     guidelines = None
-    for i in range(10):
+    for _ in range(10):
         guidelines = await generate_guidelines(llm, question, expected_answer, total_score)
         if guidelines['guidelines'].startswith("Error:") or guidelines['guidelines'].startswith(
                 "Error processing response:"):
@@ -161,8 +161,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     questions = get_all_questions(mongo_db=mongo_db, redis_client=redis_client, quiz_id=quiz_id,
                                   save_to_file=save_to_file)
 
-    keys = [os.getenv("GROQ_API_KEY3"), os.getenv("GROQ_API_KEY2"), os.getenv("GROQ_API_KEY4"),
-            os.getenv("GROQ_API_KEY"), os.getenv("GROQ_API_KEY5")]
+    keys = [os.getenv("GROQ_API_KEY"), os.getenv("GROQ_API_KEY2"), os.getenv("GROQ_API_KEY3"),
+            os.getenv("GROQ_API_KEY4"), os.getenv("GROQ_API_KEY5")]
     groq_api_keys = itertools.cycle(keys)
 
     for i, key in enumerate(keys, start=1):
@@ -199,17 +199,17 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                                         question=clean_question,
                                                                         expected_answer=question["explanation"],
                                                                         total_score=question.get("marks", 5)))
-                        score_res = await score(
-                            llm=current_llm,
-                            question=clean_question,
-                            student_ans=" ".join(student_answers),  # TODO: What the...? Why are we joining the answers?
-                            expected_ans=" ".join(question["explanation"]),
-                            total_score=question.get("marks", 10),
-                            guidelines=question_guidelines
-                        )
+                                                
+                        for i in range(10): # Catch silent errors
+                            score_res = await score(
+                                llm=current_llm,
+                                question=clean_question,
+                                student_ans=" ".join(student_answers),  # TODO: What the...? Why are we joining the answers?
+                                expected_ans=" ".join(question["explanation"]),
+                                total_score=question.get("marks", 5),
+                                guidelines=question_guidelines
+                            )
 
-                        # Catch silent errors
-                        for i in range(10):
                             if score_res["breakdown"].startswith("Error:") and score_res['rubric'].startswith("Error:"):
                                 print("Encountered Error. Retrying with a different API key with i=", i)
                                 if i < 5:
@@ -218,14 +218,6 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                     print("All API keys for SpecDec exhausted. Checking for Versatile")
                                     current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, 'llama-3.3-70b-versatile'))
 
-                                score_res = await score(
-                                    llm=current_llm,
-                                    question=clean_question,
-                                    student_ans=" ".join(student_answers),
-                                    expected_ans=" ".join(question["explanation"]),
-                                    total_score=question.get("marks", 10),
-                                    guidelines=question["guidelines"]
-                                )
                             else:
                                 break
                         else:
@@ -250,6 +242,9 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         correct_answer = question["answer"]
                         tf_score = await evaluate_true_false(response, correct_answer, question.get("marks", 1))
                         quiz_result["questionMarks"].update({qid: tf_score})
+
+                    case "FILL_IN_THE_BLANK":
+                        pass #TODO Implement Fill in the blank evaluation
 
             # Calculate total score
             quiz_result["score"] = sum(quiz_result["questionMarks"].values())
