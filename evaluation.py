@@ -254,7 +254,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
         # Calculate total score
         quiz_result["score"] = sum(quiz_result["questionMarks"].values())
-        print(f"Score for {quiz_result['studentId']}: {quiz_result['score']}")
+        # print(f"Score for {quiz_result['studentId']}: {quiz_result['score']}")
         # Write evaluated responses to file everytime a response is evaluated
         if save_to_file:
             try:
