@@ -2,20 +2,23 @@ import json
 import re
 from datetime import datetime
 
+
 class DateTimeEncoder(json.JSONEncoder):
-        def default(self, obj):
-            if isinstance(obj, (datetime)):
-                return obj.isoformat()  # Convert to ISO format
-            return super().default(obj)
-        
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()  # Convert to ISO format
+        return super().default(obj)
+
+
 # Create a function that will remove all html tags in a given string
 def remove_html_tags(data):
     p = re.compile(r'<.*?>')
     return p.sub('', data)
 
+
 if __name__ == '__main__':
     # Sample data
-    data = {
+    my_data = {
         "_id": "678f1e9ddf031e96652e5c1e",
         "type": "MCQ",
         "difficulty": "MEDIUM",
@@ -25,9 +28,9 @@ if __name__ == '__main__':
     }
 
     # Convert data to JSON with custom DateTimeEncoder
-    json_data = json.dumps(data, cls=DateTimeEncoder, indent=4) # Testing the DateTimeEncoder
+    json_data = json.dumps(my_data, cls=DateTimeEncoder, indent=4)  # Testing the DateTimeEncoder
     print(json_data)
 
     # Remove HTML tags from description
-    cleaned_description = remove_html_tags(data['question']) # Testing the remove_html_tags function
+    cleaned_description = remove_html_tags(my_data['question'])  # Testing the remove_html_tags function
     print(cleaned_description)

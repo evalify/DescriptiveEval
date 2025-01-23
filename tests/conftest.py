@@ -1,7 +1,7 @@
-import sys
-from pathlib import Path
 import logging
+import sys
 from datetime import datetime
+from pathlib import Path
 
 # Create logs directory if it doesn't exist
 log_dir = Path(__file__).parent.parent / "logs"
@@ -23,7 +23,6 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 import pytest
 from httpx import AsyncClient
-from app import app
 import subprocess
 
 

@@ -1,8 +1,9 @@
-import re
-import requests
-from typing import Tuple
 import json
 import os
+import re
+from typing import Tuple
+
+import requests
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -10,7 +11,8 @@ load_dotenv()
 JUDGE_URL = os.getenv("JUDGE_API")
 
 
-async def evaluate_coding_question(student_response: str, driver_code: str, test_cases_count: int = -1) -> Tuple[int, int]:
+async def evaluate_coding_question(student_response: str, driver_code: str, test_cases_count: int = -1) -> Tuple[
+    int, int]:
     """
     Evaluate a single student response against test cases
     Returns the number of test cases passed and the total number of test cases

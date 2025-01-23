@@ -1,6 +1,5 @@
 """This module contains all the templates for the different tasks in the evaluation pipeline."""
 
-
 evaluation_template = '''
 You are an expert evaluator. Your task is to:
 

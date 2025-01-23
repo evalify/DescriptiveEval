@@ -1,5 +1,5 @@
-import logging
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
 
@@ -18,6 +18,7 @@ logging.basicConfig(
 )
 
 logger = logging.getLogger()  # Use the root logger
+
 
 def log_evaluation(test_name, params, result):
     log_entry = {

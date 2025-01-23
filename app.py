@@ -1,18 +1,19 @@
-from fastapi import FastAPI, Depends
-from pydantic import BaseModel
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
 from typing import Optional
-from model import LLMProvider, get_llm, score, generate_guidelines, enhance_question_and_answer
-from evaluation import bulk_evaluate_quiz_responses
+
+from fastapi import FastAPI, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+
 from database import get_postgres_cursor, get_mongo_client, get_redis_client
+from evaluation import bulk_evaluate_quiz_responses
+from model import LLMProvider, get_llm, score, generate_guidelines, enhance_question_and_answer
 
 app = FastAPI()
 # Store current provider in app state
 app.state.current_provider = LLMProvider.GROQ
 
-# Mount static files directory
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app.add_middleware(
@@ -60,20 +61,22 @@ def get_llm_dependency():
     """Dependency to provide LLM instance based on current provider"""
     return get_llm(provider=app.state.current_provider)
 
+
 @app.post("/set-provider")
 async def change_provider(request: ProviderRequest):
     try:
-        provider = LLMProvider(request.provider.lower())    #TODO: Add model_name and api_key support
+        provider = LLMProvider(request.provider.lower())  # TODO: Add model_name and api_key support
         # Update the app state
         app.state.current_provider = provider
         return {"message": f"Successfully switched to {provider.value}"}
     except ValueError as e:
         return {"error": str(e)}
 
+
 @app.post("/score")
 async def get_response(
-    request: QueryRequest,
-    llm = Depends(get_llm_dependency)
+        request: QueryRequest,
+        llm=Depends(get_llm_dependency)
 ):
     result = await score(
         llm=llm,
@@ -88,8 +91,8 @@ async def get_response(
 
 @app.post("/generate-guidelines")
 async def generate_guidelines_api(
-    request: GuidelinesRequest,
-    llm = Depends(get_llm_dependency)
+        request: GuidelinesRequest,
+        llm=Depends(get_llm_dependency)
 ):
     guidelines_result = await generate_guidelines(
         llm,
@@ -102,8 +105,8 @@ async def generate_guidelines_api(
 
 @app.post("/enhance-qa")
 async def enhance_qa(
-    request: QAEnhancementRequest,
-    llm = Depends(get_llm_dependency)
+        request: QAEnhancementRequest,
+        llm=Depends(get_llm_dependency)
 ):
     result = await enhance_question_and_answer(
         llm,
@@ -113,9 +116,9 @@ async def enhance_qa(
     return result
 
 
-@app.post("/evaluate") #TODO: Implement Queueing
+@app.post("/evaluate")  # TODO: Implement Queueing
 async def evaluate_bulk(
-    request: BulkEvalRequest,
+        request: BulkEvalRequest,
 ):
     postgres_cursor, postgres_conn = get_postgres_cursor()
     mongo_db = get_mongo_client()
@@ -129,7 +132,7 @@ async def evaluate_bulk(
             redis_client,
             save_to_file=True
         )
-        return {"message": "Evaluation complete", "results": results} #TODO: Give more detailed response
+        return {"message": "Evaluation complete", "results": results}  # TODO: Give more detailed response
     finally:
         postgres_cursor.close()
         postgres_conn.close()

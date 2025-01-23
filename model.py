@@ -1,11 +1,11 @@
 import os
-
-from langchain_ollama import OllamaLLM
-from langchain_groq import ChatGroq
-from langchain_core.prompts import PromptTemplate
-from langchain.output_parsers import ResponseSchema, StructuredOutputParser
 from enum import Enum
+
 from dotenv import load_dotenv
+from langchain.output_parsers import ResponseSchema, StructuredOutputParser
+from langchain_core.prompts import PromptTemplate
+from langchain_groq import ChatGroq
+from langchain_ollama import OllamaLLM
 
 load_dotenv()
 
@@ -26,7 +26,8 @@ def get_llm(provider: LLMProvider = LLMProvider.GROQ, api_key=None, model_name=N
     :param model_name: The model name for the provider (optional)
     """
     if provider == LLMProvider.OLLAMA:
-        return OllamaLLM(model=model_name if model_name else "llama3.3", base_url=os.getenv("OLLAMA_HOST","http://localhost:11434"))
+        return OllamaLLM(model=model_name if model_name else "llama3.3",
+                         base_url=os.getenv("OLLAMA_HOST", "http://localhost:11434"))
     elif provider == LLMProvider.GROQ:
         return ChatGroq(
             api_key=api_key if api_key else os.getenv("GROQ_API_KEY"),

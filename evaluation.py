@@ -8,17 +8,18 @@ Functions:
 
 """
 
-import os
-import json
 import asyncio
-import itertools 
-from typing import Dict, List
+import itertools
+import json
+import os
+
 from dotenv import load_dotenv
-from tqdm import tqdm
 from redis import Redis
+from tqdm import tqdm
+
 from model import score, LLMProvider, get_llm, generate_guidelines
-from utils.misc import DateTimeEncoder, remove_html_tags
 from utils.code_eval import evaluate_coding_question
+from utils.misc import DateTimeEncoder, remove_html_tags
 from utils.static_eval import evaluate_mcq, evaluate_true_false
 
 load_dotenv()
@@ -175,12 +176,12 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
             for question in questions:
                 qid = str(question["_id"])
-                
-                quiz_result["totalScore"] += question.get("marks", 1) # TODO: Is this correct?
+
+                quiz_result["totalScore"] += question.get("marks", 1)  # TODO: Is this correct?
                 if qid not in quiz_result["responses"]:
                     # and not (qid not in quiz_result["remarks"] and quiz_result["remarks"] is not None):
                     continue
-                
+
                 match question.get("type", "").upper():
                     case "MCQ":
                         student_answers = quiz_result["responses"][qid]
@@ -193,18 +194,19 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         student_answers = quiz_result["responses"][qid]
                         current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, None))
                         question_guidelines = await question.get("guidelines",
-                                                        get_guidelines(redis_client=redis_client,
-                                                                        question_id=qid,
-                                                                        llm=current_llm,
-                                                                        question=clean_question,
-                                                                        expected_answer=question["explanation"],
-                                                                        total_score=question.get("marks", 5)))
-                                                
-                        for i in range(10): # Catch silent errors
+                                                                 get_guidelines(redis_client=redis_client,
+                                                                                question_id=qid,
+                                                                                llm=current_llm,
+                                                                                question=clean_question,
+                                                                                expected_answer=question["explanation"],
+                                                                                total_score=question.get("marks", 5)))
+
+                        for i in range(10):  # Catch silent errors
                             score_res = await score(
                                 llm=current_llm,
                                 question=clean_question,
-                                student_ans=" ".join(student_answers),  # TODO: What the...? Why are we joining the answers?
+                                student_ans=" ".join(student_answers),
+                                # TODO: What the...? Why are we joining the answers?
                                 expected_ans=" ".join(question["explanation"]),
                                 total_score=question.get("marks", 5),
                                 guidelines=question_guidelines
@@ -216,7 +218,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                     current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys))
                                 else:
                                     print("All API keys for SpecDec exhausted. Checking for Versatile")
-                                    current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, 'llama-3.3-70b-versatile'))
+                                    current_llm = get_llm(LLMProvider.GROQ,
+                                                          next(groq_api_keys, 'llama-3.3-70b-versatile'))
 
                             else:
                                 break
@@ -225,7 +228,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                 raise Exception("Failed to evaluate the response. All API keys exhausted.")
 
                         quiz_result["questionMarks"].update({qid: score_res["score"]})
-                        quiz_result["remarks"][qid] = f"### Reason:\n{score_res['reason']}\n\n{score_res['breakdown']}{score_res['rubric']}\n\n"
+                        quiz_result["remarks"][
+                            qid] = f"### Reason:\n{score_res['reason']}\n\n{score_res['breakdown']}{score_res['rubric']}\n\n"
 
                     case "CODING":
                         response = quiz_result["responses"][qid]
@@ -244,7 +248,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         quiz_result["questionMarks"].update({qid: tf_score})
 
                     case "FILL_IN_THE_BLANK":
-                        pass #TODO Implement Fill in the blank evaluation
+                        pass  # TODO Implement Fill in the blank evaluation
 
             # Calculate total score
             quiz_result["score"] = sum(quiz_result["questionMarks"].values())

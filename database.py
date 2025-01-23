@@ -1,13 +1,13 @@
 import os
+from typing import Tuple
+
 import psycopg2
+import redis
+from dotenv import load_dotenv
+from psycopg2.extensions import connection as postgres_connection
 from psycopg2.extras import RealDictCursor
 from pymongo import MongoClient
-from dotenv import load_dotenv
-import redis
-# For Type Hinting
-from typing import Tuple
 from pymongo.database import Database
-from psycopg2.extensions import connection as postgres_connection
 from redis import Redis
 
 load_dotenv()
