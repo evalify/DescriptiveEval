@@ -272,7 +272,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
 
 if __name__ == "__main__":
-    from database import get_postgres_cursor, get_mongo_client, get_redis_client
+    from utils.database import get_postgres_cursor, get_mongo_client, get_redis_client
 
     my_pg_cursor, my_pg_conn = get_postgres_cursor()
     my_mongo_db = get_mongo_client()

@@ -6,7 +6,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from database import get_postgres_cursor, get_mongo_client, get_redis_client
+from utils.database import get_postgres_cursor, get_mongo_client, get_redis_client
 from evaluation import bulk_evaluate_quiz_responses
 from model import LLMProvider, get_llm, score, generate_guidelines, enhance_question_and_answer
 
