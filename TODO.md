@@ -21,8 +21,8 @@
 
 ## High Priority
 
-- [ ] Add Negative marking support - flags from evaluation settings
-- [ ] Add strict checking/case sensitivity support - flags from evaluation settings
+- [x] Add Negative marking support - flags from evaluation settings
+- [ ] Add strict checking/case sensitivity support - flags from question settings
 - [ ] Partial marking/Absolute marking for Coding questions
 - [x] Add backward compatability for old schema (where quiz_result)
 
@@ -39,7 +39,6 @@
 - [ ] Setup openwebui in EvalifyVM
 - [ ] Add Queue Management for Evaluation
 
-
 ## Future Considerations
 
 1. Implement bias mitigation strategies:
@@ -47,4 +46,3 @@
 
 2. Incorporate domain-specific knowledge:
    Enhance evaluations by integrating subject expertise relevant to the questions.
-
