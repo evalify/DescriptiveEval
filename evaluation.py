@@ -62,18 +62,16 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
     "score": 16.0,
     "submittedAt": "2025-01-07 10:25:44.442000",
     "responses": {
-      "677cb6bcdee1edc79b6c4333": ["2"],
-      question_id : [answer]
+        question_id: {          # Updated Schema
+            student_answer,
+            remarks,
+            score,
+            breakdown
+        }
         ...
     },
     "violations": "",
-    "questionMarks": {
-      "677cb6bcdee1edc79b6c4333": 0,
-      question_id : marks
-        ...
-    },
     "totalScore": 45.0,
-    "remarks": null
   }
     },...]
 
@@ -170,8 +168,6 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         print(f"Key {i}: {key}")
     try:
         for quiz_result in tqdm(quiz_responses, desc="Evaluating quiz responses"):
-            if quiz_result["remarks"] is None:       quiz_result["remarks"] = {}
-            if quiz_result["questionMarks"] is None: quiz_result["questionMarks"] = {}
             quiz_result["totalScore"] = 0
 
             for question in questions:
@@ -184,14 +180,14 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
                 match question.get("type", "").upper():
                     case "MCQ":
-                        student_answers = quiz_result["responses"][qid]
+                        student_answers = quiz_result["responses"][qid]["student_answer"]
                         correct_answers = question["answer"]
                         mcq_score = await evaluate_mcq(student_answers, correct_answers, question.get("marks", 1))
-                        quiz_result["questionMarks"].update({qid: mcq_score})
+                        quiz_result["responses"][qid]["score"] = mcq_score
 
                     case "DESCRIPTIVE":
                         clean_question = remove_html_tags(question['question']).strip()
-                        student_answers = quiz_result["responses"][qid]
+                        student_answer = quiz_result["responses"][qid]["student_answer"][0]
                         current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, None))
                         question_guidelines = await question.get("guidelines",
                                                                  get_guidelines(redis_client=redis_client,
@@ -205,7 +201,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                             score_res = await score(
                                 llm=current_llm,
                                 question=clean_question,
-                                student_ans=" ".join(student_answers),
+                                student_ans=student_answer,
                                 # TODO: What the...? Why are we joining the answers?
                                 expected_ans=" ".join(question["explanation"]),
                                 total_score=question.get("marks", 5),
@@ -227,31 +223,31 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                             if score_res["breakdown"].startswith("Error:") and score_res['rubric'].startswith("Error:"):
                                 raise Exception("Failed to evaluate the response. All API keys exhausted.")
 
-                        quiz_result["questionMarks"].update({qid: score_res["score"]})
-                        quiz_result["remarks"][
-                            qid] = f"### Reason:\n{score_res['reason']}\n\n{score_res['breakdown']}{score_res['rubric']}\n\n"
+                        quiz_result["responses"][qid]["score"] = score_res["score"]
+                        quiz_result["responses"][qid]["remarks"] = score_res['reason']
+                        quiz_result["responses"][qid]["breakdown"] = score_res["breakdown"]
 
                     case "CODING":
-                        response = quiz_result["responses"][qid]
+                        response = quiz_result["responses"][qid]["student_answer"][0]
                         driver_code = question["driverCode"]
                         coding_score, _ = await evaluate_coding_question(
                             student_response=response[0],
                             driver_code=driver_code,
                             test_cases_count=len(question.get("testcases"))
                         )
-                        quiz_result["questionMarks"].update({qid: coding_score})
+                        quiz_result["responses"][qid]["score"] = coding_score
 
                     case "TRUE_FALSE":
-                        response = quiz_result["responses"][qid][0]
+                        response = quiz_result["responses"][qid]["student_answer"][0]
                         correct_answer = question["answer"]
                         tf_score = await evaluate_true_false(response, correct_answer, question.get("marks", 1))
-                        quiz_result["questionMarks"].update({qid: tf_score})
+                        quiz_result["responses"][qid]["score"] = tf_score
 
                     case "FILL_IN_THE_BLANK":
                         pass  # TODO Implement Fill in the blank evaluation
 
             # Calculate total score
-            quiz_result["score"] = sum(quiz_result["questionMarks"].values())
+            quiz_result["score"] = sum([response["score"] for response in quiz_result["responses"].values()])
             # print(f"Score for {quiz_result['studentId']}: {quiz_result['score']}")
             # Write evaluated responses to file everytime a response is evaluated
     finally:
@@ -263,15 +259,14 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 print(f"Error writing to file: {e}")
 
     # Save results back to database
-    # for result in quiz_responses:
-    #     pg_cursor.execute(
-    #         """UPDATE "QuizResult" 
-    #            SET "score" = %s, "remarks" = %s, "questionMarks" = %s 
-    #            WHERE "id" = %s""",
-    #         (result["score"], json.dumps(result["remarks"]), 
-    #          json.dumps(result["questionMarks"]), result["id"])
-    #     )
-    # pg_conn.commit()
+    for response in quiz_responses:
+        pg_cursor.execute(
+            """UPDATE "QuizResult" 
+               SET “responses” = %s
+               WHERE "id" = %s""",
+            (json.dumps(response["responses"]), response["id"])
+        )
+    pg_conn.commit()
 
     return quiz_responses  # TODO: Update return message to be more meaningful
 
