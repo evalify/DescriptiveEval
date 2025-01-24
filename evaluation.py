@@ -21,6 +21,7 @@ from model import score, LLMProvider, get_llm, generate_guidelines
 from utils.code_eval import evaluate_coding_question
 from utils.misc import DateTimeEncoder, remove_html_tags
 from utils.static_eval import evaluate_mcq, evaluate_true_false
+from utils.schema_utils import QuizResponseSchema
 
 load_dotenv()
 CACHE_EX = int(os.getenv('CACHE_EXPIRY', 3600))  # Cache expiry time in seconds
@@ -180,14 +181,14 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
                 match question.get("type", "").upper():
                     case "MCQ":
-                        student_answers = quiz_result["responses"][qid]["student_answer"]
+                        student_answers = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')
                         correct_answers = question["answer"]
                         mcq_score = await evaluate_mcq(student_answers, correct_answers, question.get("marks", 1))
-                        quiz_result["responses"][qid]["score"] = mcq_score
+                        QuizResponseSchema.set_attribute(quiz_result, qid, 'score', mcq_score)
 
                     case "DESCRIPTIVE":
                         clean_question = remove_html_tags(question['question']).strip()
-                        student_answer = quiz_result["responses"][qid]["student_answer"][0]
+                        student_answer = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
                         current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, None))
                         question_guidelines = await question.get("guidelines",
                                                                  get_guidelines(redis_client=redis_client,
@@ -197,6 +198,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                                                 expected_answer=question["explanation"],
                                                                                 total_score=question.get("marks", 5)))
 
+                        score_res = None
                         for i in range(10):  # Catch silent errors
                             score_res = await score(
                                 llm=current_llm,
@@ -220,34 +222,34 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                             else:
                                 break
                         else:
-                            if score_res["breakdown"].startswith("Error:") and score_res['rubric'].startswith("Error:"):
+                            if score_res and score_res["breakdown"].startswith("Error:") and score_res['rubric'].startswith("Error:"):
                                 raise Exception("Failed to evaluate the response. All API keys exhausted.")
 
-                        quiz_result["responses"][qid]["score"] = score_res["score"]
-                        quiz_result["responses"][qid]["remarks"] = score_res['reason']
-                        quiz_result["responses"][qid]["breakdown"] = score_res["breakdown"]
+                        QuizResponseSchema.set_attribute(quiz_result, qid, 'score', score_res["score"])
+                        QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', score_res['reason'])
+                        QuizResponseSchema.set_attribute(quiz_result, qid, 'breakdown', score_res["breakdown"])
 
                     case "CODING":
-                        response = quiz_result["responses"][qid]["student_answer"][0]
+                        response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
                         driver_code = question["driverCode"]
                         coding_score, _ = await evaluate_coding_question(
                             student_response=response[0],
                             driver_code=driver_code,
                             test_cases_count=len(question.get("testcases"))
                         )
-                        quiz_result["responses"][qid]["score"] = coding_score
+                        QuizResponseSchema.set_attribute(quiz_result, qid, 'score', coding_score)
 
                     case "TRUE_FALSE":
-                        response = quiz_result["responses"][qid]["student_answer"][0]
+                        response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
                         correct_answer = question["answer"]
                         tf_score = await evaluate_true_false(response, correct_answer, question.get("marks", 1))
-                        quiz_result["responses"][qid]["score"] = tf_score
+                        QuizResponseSchema.set_attribute(quiz_result, qid, 'score', tf_score)
 
                     case "FILL_IN_THE_BLANK":
                         pass  # TODO Implement Fill in the blank evaluation
 
             # Calculate total score
-            quiz_result["score"] = sum([response["score"] for response in quiz_result["responses"].values()])
+            quiz_result["score"] = sum([QuizResponseSchema.get_attribute(quiz_result, qid, 'score') for qid in quiz_result["responses"].keys()])
             # print(f"Score for {quiz_result['studentId']}: {quiz_result['score']}")
             # Write evaluated responses to file everytime a response is evaluated
     finally:
