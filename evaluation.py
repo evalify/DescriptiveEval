@@ -20,8 +20,8 @@ from tqdm import tqdm
 from model import score, LLMProvider, get_llm, generate_guidelines
 from utils.code_eval import evaluate_coding_question
 from utils.misc import DateTimeEncoder, remove_html_tags
-from utils.static_eval import evaluate_mcq, evaluate_true_false
 from utils.schema_utils import QuizResponseSchema
+from utils.static_eval import evaluate_mcq, evaluate_true_false, direct_match
 
 load_dotenv()
 CACHE_EX = int(os.getenv('CACHE_EXPIRY', 3600))  # Cache expiry time in seconds
@@ -163,10 +163,10 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
     keys = [os.getenv("GROQ_API_KEY"), os.getenv("GROQ_API_KEY2"), os.getenv("GROQ_API_KEY3"),
             os.getenv("GROQ_API_KEY4"), os.getenv("GROQ_API_KEY5")]
-    groq_api_keys = itertools.cycle(keys)
-
+    groq_api_keys = itertools.cycle([key for key in keys if key is not None])
     for i, key in enumerate(keys, start=1):
         print(f"Key {i}: {key}")
+
     try:
         for quiz_result in tqdm(quiz_responses, desc="Evaluating quiz responses"):
             quiz_result["totalScore"] = 0
@@ -189,41 +189,55 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                     case "DESCRIPTIVE":
                         clean_question = remove_html_tags(question['question']).strip()
                         student_answer = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
-                        current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, None))
-                        question_guidelines = await question.get("guidelines",
-                                                                 get_guidelines(redis_client=redis_client,
-                                                                                question_id=qid,
-                                                                                llm=current_llm,
-                                                                                question=clean_question,
-                                                                                expected_answer=question["explanation"],
-                                                                                total_score=question.get("marks", 5)))
+                        question_total_score = question.get("marks", 5)
 
-                        score_res = None
-                        for i in range(10):  # Catch silent errors
-                            score_res = await score(
-                                llm=current_llm,
-                                question=clean_question,
-                                student_ans=student_answer,
-                                # TODO: What the...? Why are we joining the answers?
-                                expected_ans=" ".join(question["explanation"]),
-                                total_score=question.get("marks", 5),
-                                guidelines=question_guidelines
-                            )
-
-                            if score_res["breakdown"].startswith("Error:") and score_res['rubric'].startswith("Error:"):
-                                print("Encountered Error. Retrying with a different API key with i=", i)
-                                if i < 5:
-                                    current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys))
-                                else:
-                                    print("All API keys for SpecDec exhausted. Checking for Versatile")
-                                    current_llm = get_llm(LLMProvider.GROQ,
-                                                          next(groq_api_keys, 'llama-3.3-70b-versatile'))
-
-                            else:
-                                break
+                        if await direct_match(student_answer, question["explanation"], strip=True,
+                                              case_sensitive=False):
+                            score_res = {
+                                "score": question_total_score,
+                                "reason": "Exact Match",
+                                "breakdown": "Exact Match - LLM not used"
+                            }
                         else:
-                            if score_res and score_res["breakdown"].startswith("Error:") and score_res['rubric'].startswith("Error:"):
-                                raise Exception("Failed to evaluate the response. All API keys exhausted.")
+                            current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, None))
+                            question_guidelines = await question.get("guidelines",
+                                                                     get_guidelines(redis_client=redis_client,
+                                                                                    question_id=qid,
+                                                                                    llm=current_llm,
+                                                                                    question=clean_question,
+                                                                                    expected_answer=question[
+                                                                                        "explanation"],
+                                                                                    total_score=question_total_score))
+
+                            score_res = None
+                            for i in range(10):  # Catch silent errors
+                                score_res = await score(
+                                    llm=current_llm,
+                                    question=clean_question,
+                                    student_ans=student_answer,
+                                    # TODO: What the...? Why are we joining the answers?
+                                    expected_ans=" ".join(question["explanation"]),
+                                    total_score=question_total_score,
+                                    guidelines=question_guidelines
+                                )
+
+                                if (score_res["breakdown"].startswith("Error:")
+                                        and
+                                        score_res['rubric'].startswith("Error:")):
+                                    print("Encountered Error. Retrying with a different API key with i=", i)
+                                    if i < 5:
+                                        current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys))
+                                    else:
+                                        print("All API keys for SpecDec exhausted. Checking for Versatile")
+                                        current_llm = get_llm(LLMProvider.GROQ,
+                                                              next(groq_api_keys, 'llama-3.3-70b-versatile'))
+
+                                else:
+                                    break
+                            else:
+                                if score_res and score_res["breakdown"].startswith("Error:") and score_res[
+                                    'rubric'].startswith("Error:"):
+                                    raise Exception("Failed to evaluate the response. All API keys exhausted.")
 
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'score', score_res["score"])
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', score_res['reason'])
@@ -246,12 +260,19 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'score', tf_score)
 
                     case "FILL_IN_THE_BLANK":
-                        pass  # TODO Implement Fill in the blank evaluation
+                        response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
+                        correct_answer = question["answer"]
+                        if await direct_match(response, correct_answer, strip=True, case_sensitive=False):
+                            fitb_score = question.get("marks", 1)
+                        else:
+                            fitb_score = 0  # TODO: Implement LLM Scoring for Fill in the Blanks
+
+                        QuizResponseSchema.set_attribute(quiz_result, qid, 'score', fitb_score)
 
             # Calculate total score
-            quiz_result["score"] = sum([QuizResponseSchema.get_attribute(quiz_result, qid, 'score') for qid in quiz_result["responses"].keys()])
+            quiz_result["score"] = sum([QuizResponseSchema.get_attribute(quiz_result, qid, 'score') for qid in
+                                        quiz_result["responses"].keys()])
             # print(f"Score for {quiz_result['studentId']}: {quiz_result['score']}")
-            # Write evaluated responses to file everytime a response is evaluated
     finally:
         if save_to_file:
             try:
@@ -264,7 +285,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     for response in quiz_responses:
         pg_cursor.execute(
             """UPDATE "QuizResult" 
-               SET “responses” = %s
+               SET "responses" = %s
                WHERE "id" = %s""",
             (json.dumps(response["responses"]), response["id"])
         )
