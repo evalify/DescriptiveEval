@@ -171,7 +171,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                   save_to_file=save_to_file)
 
     evaluation_settings = get_evaluation_settings(pg_cursor, quiz_id) or {}
-    negative_marking = evaluation_settings.get("negativeMarking", True)
+    print(f"Settings for quiz {quiz_id}: {evaluation_settings!r}")
+    negative_marking = evaluation_settings.get("negativeMarking", False)
 
     keys = [os.getenv("GROQ_API_KEY"), os.getenv("GROQ_API_KEY2"), os.getenv("GROQ_API_KEY3"),
             os.getenv("GROQ_API_KEY4"), os.getenv("GROQ_API_KEY5")]
