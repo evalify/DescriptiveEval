@@ -1,10 +1,9 @@
+import json
 import pytest
-
 from model import get_llm, LLMProvider, score, generate_guidelines, enhance_question_and_answer
 from utils.logger import log_evaluation
 
 DEFAULT_PROVIDER = LLMProvider.GROQ
-
 
 def print_result(test_name, result):
     print(f"\n=== {test_name} Output ===")
@@ -104,7 +103,7 @@ async def test_score_with_question_and_guidelines():
 
 
 @pytest.mark.asyncio
-async def test_rubric_and_breakdown():
+async def test_rubic_and_breakdown():
     llm = get_llm(DEFAULT_PROVIDER)
     params = {
         "question": "Explain the process of photosynthesis.",
@@ -138,7 +137,6 @@ async def test_generate_guidelines():
     assert isinstance(result.get('guidelines'), str)
     assert len(result) > 0
 
-
 @pytest.mark.asyncio
 async def test_enhance_question_and_answer():
     llm = get_llm(DEFAULT_PROVIDER)
@@ -151,11 +149,9 @@ async def test_enhance_question_and_answer():
     assert "enhanced_question" in result
     assert "enhanced_expected_ans" in result
 
-
 def test_invalid_provider():
     with pytest.raises(ValueError):
         get_llm("INVALID_PROVIDER")
-
 
 @pytest.mark.asyncio
 async def test_empty_guidelines_generation():
@@ -166,7 +162,6 @@ async def test_empty_guidelines_generation():
     }
     result = await generate_guidelines(llm=llm, **params)
     assert result.get('guidelines').startswith("Error:")
-
 
 @pytest.mark.asyncio
 async def test_edge_cases_score():

@@ -15,21 +15,21 @@ This repository demonstrates how to evaluate descriptive answers using large lan
 ## Prerequisites
 
 - Python 3.9+
-- Install dependencies:  
-  - pip install -r requirements.txt  
+- Install dependencies:
+    - pip install -r requirements.txt
 - Environment variables for CockroachDB, MongoDB, and any required LLM API keys.
 
 ## Usage
 
 1. Start the FastAPI server:
-   - python app.py  
+    - python app.py
 2. Send requests to the endpoints (/score, /generate-guidelines, etc.).
 3. To update the LLM provider, use the "/set-provider" POST endpoint.
 
 ## Testing
 
 - Run tests with pytest (including async tests):
-  - pytest
+    - pytest
 
 ## Notes
 
