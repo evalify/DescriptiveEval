@@ -174,6 +174,14 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             for question in questions:
                 qid = str(question["_id"])
 
+                # Convert old schema to new schema if the response is a list
+                if isinstance(quiz_result["responses"].get(qid), list):
+                    quiz_result["responses"][qid] = {
+                        "student_answer": quiz_result["responses"][qid],
+                        # Other parameters are set to None by default
+                    }
+
+
                 quiz_result["totalScore"] += question.get("marks", 1)  # TODO: Is this correct?
                 if qid not in quiz_result["responses"]:
                     # and not (qid not in quiz_result["remarks"] and quiz_result["remarks"] is not None):

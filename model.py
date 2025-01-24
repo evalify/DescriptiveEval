@@ -49,7 +49,7 @@ async def score(llm, student_ans, expected_ans, total_score, question=None, guid
     :param question: The question (optional)
     :param guidelines: The evaluation guidelines and criteria (optional)
     """
-    if not expected_ans or expected_ans.strip() == "" or total_score < 1:
+    if not expected_ans or expected_ans.strip() == "" or total_score < 1: #TODO: Use better error handling
         return {
             "score": 0.0,
             "reason": f"Error: Invalid input parameters: expected_ans='{expected_ans}', total_score='{total_score}'",
