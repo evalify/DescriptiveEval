@@ -142,6 +142,17 @@ def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=
     return questions
 
 
+def get_evaluation_settings(cursor, quiz_id: str) -> dict | None:
+    """
+    Get the evaluation settings for a quiz from the Cockroach database.
+    """
+    query = """
+       SELECT * FROM "EvaluationSettings" WHERE "quizId" = %s;
+    """
+    cursor.execute(query, (quiz_id,))
+    return cursor.fetchone()
+
+
 async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db,
                                        redis_client: Redis, save_to_file=True):  # TODO: Handle Errors
     """
@@ -158,6 +169,9 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                         save_to_file=save_to_file)
     questions = get_all_questions(mongo_db=mongo_db, redis_client=redis_client, quiz_id=quiz_id,
                                   save_to_file=save_to_file)
+
+    evaluation_settings = get_evaluation_settings(pg_cursor, quiz_id) or {}
+    negative_marking = evaluation_settings.get("negativeMarking", True)
 
     keys = [os.getenv("GROQ_API_KEY"), os.getenv("GROQ_API_KEY2"), os.getenv("GROQ_API_KEY3"),
             os.getenv("GROQ_API_KEY4"), os.getenv("GROQ_API_KEY5")]
@@ -193,7 +207,12 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         student_answers = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')
                         correct_answers = question["answer"]
                         mcq_score = await evaluate_mcq(student_answers, correct_answers, question_total_score)
+
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'score', mcq_score)
+                        QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score',
+                                                         question.get("negativeMark", -1)
+                                                         if negative_marking and mcq_score <= 0
+                                                         else 0)
 
                     case "DESCRIPTIVE":
                         clean_question = remove_html_tags(question['question']).strip()
@@ -227,10 +246,12 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                     guidelines=question_guidelines
                                 )
 
-                                if any(score_res[key].startswith("Error:") for key in ["breakdown", "rubric"]) or score_res is None:
+                                if any(score_res[key].startswith("Error:") for key in
+                                       ["breakdown", "rubric"]) or score_res is None:
                                     print("Encountered Error. Retrying with a different API key with i=", i)
                                     current_llm = get_llm(LLMProvider.GROQ,
-                                                            next(groq_api_keys), 'llama-3.3-70b-versatile' if i>5 else None)
+                                                          next(groq_api_keys),
+                                                          'llama-3.3-70b-versatile' if i > 5 else None)
                                 else:
                                     break
                             else:
@@ -262,16 +283,21 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         if await direct_match(response, correct_answer, strip=True, case_sensitive=False):
                             fitb_score = question_total_score
                         else:
-                            fitb_score = 0  # TODO: Implement LLM Scoring for Fill in the Blanks
-
+                            # TODO: Implement LLM Scoring for Fill in the Blanks
+                            fitb_score = 0
+                            QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score',
+                                                             question.get("negativeMark", -1)
+                                                             if negative_marking else 0)
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'score', fitb_score)
 
                     case _:
                         print(f"Question type '{question.get('type')!r}' is not found")
 
             # Calculate total score
-            quiz_result["score"] = sum([QuizResponseSchema.get_attribute(quiz_result, qid, 'score') for qid in
-                                        quiz_result["responses"].keys()])
+            quiz_result["score"] = sum([
+                QuizResponseSchema.get_attribute(quiz_result, qid, 'score') + (
+                        QuizResponseSchema.get_attribute(quiz_result, qid, 'negative_score') or 0)
+                for qid in quiz_result["responses"].keys()])
     finally:
         if save_to_file:
             try:
@@ -301,7 +327,6 @@ if __name__ == "__main__":
     my_redis_client = get_redis_client()
 
     my_quiz_id = "cm65yjwna0006xydnis96mbwm"
-
     # Evaluate quiz responses
     asyncio.run(bulk_evaluate_quiz_responses(
         quiz_id=my_quiz_id,
