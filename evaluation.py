@@ -277,18 +277,18 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         correct_answer = question["answer"]
                         tf_score = await evaluate_true_false(response, correct_answer, question_total_score)
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'score', tf_score)
+                        QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score',
+                                                         question.get("negativeMark", -1)
+                                                         if negative_marking and tf_score <= 0
+                                                         else 0)
 
                     case "FILL_IN_THE_BLANK":
                         response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
                         correct_answer = question["answer"]
                         if await direct_match(response, correct_answer, strip=True, case_sensitive=False):
                             fitb_score = question_total_score
-                        else:
-                            # TODO: Implement LLM Scoring for Fill in the Blanks
-                            fitb_score = 0
-                            QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score',
-                                                             question.get("negativeMark", -1)
-                                                             if negative_marking else 0)
+                        else: 
+                            fitb_score = 0 # TODO: Implement LLM Scoring for Fill in the Blanks
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'score', fitb_score)
 
                     case _:
