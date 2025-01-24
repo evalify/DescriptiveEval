@@ -82,7 +82,6 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
     :param redis_client: Redis client for caching
     :param quiz_id: The ID of the quiz to retrieve responses for
     :param save_to_file: Save the responses to a file (default: True)
-    :param save_to_file: Save the responses to a file (default: True)
     """
     cached_responses = redis_client.get(quiz_id + '_responses_evalcache')
     if cached_responses:
@@ -99,12 +98,12 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
         response['id'] = str(response['id'])
         response['submittedAt'] = str(response['submittedAt'])
 
-    redis_client.set(f'{quiz_id}_responses_evalcache', json.dumps(quiz_responses), ex=CACHE_EX)
+    redis_client.set(f'{quiz_id}_responses_evalcache', json.dumps(quiz_responses, cls=DateTimeEncoder), ex=CACHE_EX)
 
     if save_to_file:
         try:
-            with open(f'data/json/quiz_responses_{quiz_id}.json', 'w') as f:
-                json.dump(quiz_responses, f, indent=4)
+            with open(f'data/json/{quiz_id}_quiz_responses.json', 'w') as f:
+                json.dump(quiz_responses, f, indent=4, cls=DateTimeEncoder)
         except IOError as e:
             print(f"Error writing to file: {e}")
 
@@ -136,7 +135,7 @@ def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=
 
     if save_to_file:
         try:
-            with open(f'data/json/quiz_questions_{quiz_id}.json', 'w') as f:
+            with open(f'data/json/{quiz_id}_quiz_questions.json', 'w') as f:
                 json.dump(questions, f, indent=4, cls=DateTimeEncoder)
         except IOError as e:
             print(f"Error writing to file: {e}")
@@ -154,7 +153,6 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     :param mongo_db: MongoDB database from database.get_mongo_client() - for getting questions
     :param redis_client: Redis client from database.get_redis_client() - for caching
     :param save_to_file: Save the evaluated responses to a file (default: True)
-    :param save_to_file: Save the evaluated responses to a file (default: True)
     """
     quiz_responses = get_quiz_responses(cursor=pg_cursor, redis_client=redis_client, quiz_id=quiz_id,
                                         save_to_file=save_to_file)
@@ -170,7 +168,6 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     try:
         for quiz_result in tqdm(quiz_responses, desc="Evaluating quiz responses"):
             quiz_result["totalScore"] = 0
-
             for question in questions:
                 qid = str(question["_id"])
 
@@ -180,9 +177,13 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         "student_answer": quiz_result["responses"][qid],
                         # Other parameters are set to None by default
                     }
+                try:
+                    quiz_result["totalScore"] += question["mark"]  # TODO: Is this correct?
+                    question_total_score = question["mark"]
+                except KeyError:
+                    print(f"Question {qid!r} does not have a 'mark' attribute. Skipping")
+                    continue
 
-
-                quiz_result["totalScore"] += question.get("marks", 1)  # TODO: Is this correct?
                 if qid not in quiz_result["responses"]:
                     # and not (qid not in quiz_result["remarks"] and quiz_result["remarks"] is not None):
                     continue
@@ -191,13 +192,12 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                     case "MCQ":
                         student_answers = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')
                         correct_answers = question["answer"]
-                        mcq_score = await evaluate_mcq(student_answers, correct_answers, question.get("marks", 1))
+                        mcq_score = await evaluate_mcq(student_answers, correct_answers, question_total_score)
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'score', mcq_score)
 
                     case "DESCRIPTIVE":
                         clean_question = remove_html_tags(question['question']).strip()
                         student_answer = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
-                        question_total_score = question.get("marks", 5)
 
                         if await direct_match(student_answer, question["explanation"], strip=True,
                                               case_sensitive=False):
@@ -216,8 +216,6 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                                                     expected_answer=question[
                                                                                         "explanation"],
                                                                                     total_score=question_total_score))
-
-                            score_res = None
                             for i in range(10):  # Catch silent errors
                                 score_res = await score(
                                     llm=current_llm,
@@ -229,23 +227,14 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                     guidelines=question_guidelines
                                 )
 
-                                if (score_res["breakdown"].startswith("Error:")
-                                        and
-                                        score_res['rubric'].startswith("Error:")):
+                                if any(score_res[key].startswith("Error:") for key in ["breakdown", "rubric"]) or score_res is None:
                                     print("Encountered Error. Retrying with a different API key with i=", i)
-                                    if i < 5:
-                                        current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys))
-                                    else:
-                                        print("All API keys for SpecDec exhausted. Checking for Versatile")
-                                        current_llm = get_llm(LLMProvider.GROQ,
-                                                              next(groq_api_keys, 'llama-3.3-70b-versatile'))
-
+                                    current_llm = get_llm(LLMProvider.GROQ,
+                                                            next(groq_api_keys), 'llama-3.3-70b-versatile' if i>5 else None)
                                 else:
                                     break
                             else:
-                                if score_res and score_res["breakdown"].startswith("Error:") and score_res[
-                                    'rubric'].startswith("Error:"):
-                                    raise Exception("Failed to evaluate the response. All API keys exhausted.")
+                                raise Exception("Failed to evaluate the response. All API keys exhausted.")
 
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'score', score_res["score"])
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', score_res['reason'])
@@ -264,40 +253,42 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                     case "TRUE_FALSE":
                         response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
                         correct_answer = question["answer"]
-                        tf_score = await evaluate_true_false(response, correct_answer, question.get("marks", 1))
+                        tf_score = await evaluate_true_false(response, correct_answer, question_total_score)
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'score', tf_score)
 
                     case "FILL_IN_THE_BLANK":
                         response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
                         correct_answer = question["answer"]
                         if await direct_match(response, correct_answer, strip=True, case_sensitive=False):
-                            fitb_score = question.get("marks", 1)
+                            fitb_score = question_total_score
                         else:
                             fitb_score = 0  # TODO: Implement LLM Scoring for Fill in the Blanks
 
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'score', fitb_score)
 
+                    case _:
+                        print(f"Question type '{question.get('type')!r}' is not found")
+
             # Calculate total score
             quiz_result["score"] = sum([QuizResponseSchema.get_attribute(quiz_result, qid, 'score') for qid in
                                         quiz_result["responses"].keys()])
-            # print(f"Score for {quiz_result['studentId']}: {quiz_result['score']}")
     finally:
         if save_to_file:
             try:
-                with open(f'data/json/quiz_responses_evaluated_{quiz_id}.json', 'w') as f:
-                    json.dump(quiz_responses, f, indent=4)
+                with open(f'data/json/{quiz_id}_quiz_responses_evaluated.json', 'w') as f:
+                    json.dump(quiz_responses, f, indent=4, cls=DateTimeEncoder)
             except IOError as e:
                 print(f"Error writing to file: {e}")
 
     # Save results back to database
-    for response in quiz_responses:
-        pg_cursor.execute(
-            """UPDATE "QuizResult" 
-               SET "responses" = %s
-               WHERE "id" = %s""",
-            (json.dumps(response["responses"]), response["id"])
-        )
-    pg_conn.commit()
+    # for response in quiz_responses:
+    #     pg_cursor.execute(
+    #         """UPDATE "QuizResult" 
+    #            SET "responses" = %s
+    #            WHERE "id" = %s""",
+    #         (json.dumps(response["responses"]), response["id"])
+    #     )
+    # pg_conn.commit()
 
     return quiz_responses  # TODO: Update return message to be more meaningful
 
@@ -309,7 +300,7 @@ if __name__ == "__main__":
     my_mongo_db = get_mongo_client()
     my_redis_client = get_redis_client()
 
-    my_quiz_id = "cm64n3edl0006xyrxnp4llbe4"
+    my_quiz_id = "cm65yjwna0006xydnis96mbwm"
 
     # Evaluate quiz responses
     asyncio.run(bulk_evaluate_quiz_responses(
