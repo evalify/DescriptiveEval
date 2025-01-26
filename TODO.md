@@ -1,5 +1,7 @@
 # TO-DO
 
+## Descriptive Evaluation
+
 - [ ] Tweak Guidelines generation to be more specific
 - [ ] Fix /score to allow full marks for good answers
 - [x] Add Tests for new features
@@ -22,22 +24,32 @@
 ## High Priority
 
 - [x] Add Negative marking support - flags from evaluation settings
-- [ ] Add strict checking/case sensitivity support - flags from question settings
-- [ ] Partial marking/Absolute marking for Coding questions
 - [x] Add backward compatability for old schema (where quiz_result)
+- [x] Add isEvaluated in Quiz & QuizResult
+- [x] Partial Marking for MCQs
+- [ ] Add QuizReport aka Statistics - follow schema refer [route](https://github.com/Aksaykanthan/evalify/blob/main/src/app/api/staff/result/route.ts)
+- [ ] Check out VideoPoet
 
 ## Medium Priority
 
 - [ ] Add model selection support
 - [ ] Add API for retrieving available models
+- [ ] Add Get Route for /status retrival
+  1. Unevaluated
+  2. Pending
+  3. Evaluating
+  4. Completed
+- [ ] Add support for selective (question-id) re-evaluation of questions
 - [x] Centralize schema for evaluation
 
 ## Low Priority
 
+- [ ] Add strict checking/case sensitivity support - flags from mongodb question settings (strictMatch)
+- [ ] Partial marking/Absolute marking for Coding questions
 - [ ] Add support for LiteLLM
 - [ ] Add support thinking model support for Evaluator-LLM
-- [ ] Setup openwebui in EvalifyVM
 - [ ] Add Queue Management for Evaluation
+- [x] Setup openwebui in EvalifyVM
 
 ## Future Considerations
 
