@@ -21,7 +21,7 @@ from model import score, LLMProvider, get_llm, generate_guidelines
 from utils.code_eval import evaluate_coding_question
 from utils.misc import DateTimeEncoder, remove_html_tags
 from utils.schema_utils import QuizResponseSchema
-from utils.static_eval import evaluate_mcq, evaluate_true_false, direct_match
+from utils.static_eval import evaluate_mcq, evaluate_mcq_with_partial_marking, evaluate_true_false, direct_match
 
 load_dotenv()
 CACHE_EX = int(os.getenv('CACHE_EXPIRY', 3600))  # Cache expiry time in seconds
@@ -109,6 +109,15 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
 
     return quiz_responses
 
+async def set_quiz_response(cursor,conn, response: dict):
+    await asyncio.to_thread(
+        cursor.execute,
+        """UPDATE "QuizResult" 
+           SET "responses" = %s, "score" = %s, "totalScore" = %s, isEvaluated = TRUE
+           WHERE "id" = %s""",
+        (json.dumps(response["responses"]), response["score"], response["totalScore"], response["id"])
+    )
+    await asyncio.to_thread(conn.commit)
 
 def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=True):
     """
@@ -173,6 +182,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     evaluation_settings = get_evaluation_settings(pg_cursor, quiz_id) or {}
     print(f"Settings for quiz {quiz_id}: {evaluation_settings!r}")
     negative_marking = evaluation_settings.get("negativeMark", False)
+    mcq_partial_marking = evaluation_settings.get("mcqPartialMark", False)
 
     keys = [os.getenv("GROQ_API_KEY"), os.getenv("GROQ_API_KEY2"), os.getenv("GROQ_API_KEY3"),
             os.getenv("GROQ_API_KEY4"), os.getenv("GROQ_API_KEY5")]
@@ -192,6 +202,9 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         "student_answer": quiz_result["responses"][qid],
                         # Other parameters are set to None by default
                     }
+                    # Drop questionMarks
+                    if "questionMarks" in quiz_result:
+                        del quiz_result["questionMarks"]
                 try:
                     quiz_result["totalScore"] += question["mark"]  # TODO: Is this correct?
                     question_total_score = question["mark"]
@@ -207,13 +220,16 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                     case "MCQ":
                         student_answers = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')
                         correct_answers = question["answer"]
-                        mcq_score = await evaluate_mcq(student_answers, correct_answers, question_total_score)
+                        if mcq_partial_marking:
+                            mcq_score = await evaluate_mcq_with_partial_marking(student_answers, correct_answers, question_total_score)
+                        else:
+                            mcq_score = await evaluate_mcq(student_answers, correct_answers, question_total_score)
 
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'score', mcq_score)
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score',
                                                          question.get("negativeMark", -1)
                                                          if negative_marking and mcq_score <= 0
-                                                         else 0)
+                                                         else 0) #TODO: Partial marking for MCQ
 
                     case "DESCRIPTIVE":
                         clean_question = remove_html_tags(question['question']).strip()
@@ -299,23 +315,21 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 QuizResponseSchema.get_attribute(quiz_result, qid, 'score') + (
                         QuizResponseSchema.get_attribute(quiz_result, qid, 'negative_score') or 0)
                 for qid in quiz_result["responses"].keys()])
+            
+            # Save result back to database
+            await set_quiz_response(pg_cursor, pg_conn, quiz_result)
     finally:
+        # Set Quiz isEvaluated = TRUE
+        pg_cursor.execute(
+        """UPDATE "Quiz" SET "isEvaluated" = TRUE WHERE "id" = %s""",
+        (quiz_id,))
+        pg_conn.commit
         if save_to_file:
             try:
                 with open(f'data/json/{quiz_id}_quiz_responses_evaluated.json', 'w') as f:
                     json.dump(quiz_responses, f, indent=4, cls=DateTimeEncoder)
             except IOError as e:
                 print(f"Error writing to file: {e}")
-
-    # Save results back to database
-    # for response in quiz_responses:
-    #     pg_cursor.execute(
-    #         """UPDATE "QuizResult" 
-    #            SET "responses" = %s
-    #            WHERE "id" = %s""",
-    #         (json.dumps(response["responses"]), response["id"])
-    #     )
-    # pg_conn.commit()
 
     return quiz_responses  # TODO: Update return message to be more meaningful
 

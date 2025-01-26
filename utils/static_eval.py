@@ -1,9 +1,23 @@
-async def evaluate_mcq(student_answers: str, correct_answers: str, total_score: float) -> float:
+from typing import List
+
+async def evaluate_mcq(student_answers: List[str], correct_answers: List[str], total_score: float) -> float:
     if set(student_answers) == set(correct_answers):  # TODO: Check if this is the correct way to compare
         return total_score
     else:
         return 0
 
+async def evaluate_mcq_with_partial_marking(student_answers: List[str], correct_answers: List[str], total_score: float) -> float:
+    """
+    Give Partial Marking for MCQs based on the number of correct answers selected by the student.
+    """
+    correct_count = 0
+    for student_answer in student_answers:
+        if student_answer in correct_answers:
+            correct_count += 1
+        else:
+            return 0
+    return total_score * (correct_count / len(correct_answers))
+    
 
 async def evaluate_true_false(student_answer: str, correct_answer: str, total_score: float) -> float:
     if student_answer == correct_answer:
