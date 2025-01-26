@@ -22,7 +22,7 @@ from utils.code_eval import evaluate_coding_question
 from utils.misc import DateTimeEncoder, remove_html_tags
 from utils.schema_utils import QuizResponseSchema
 from utils.static_eval import evaluate_mcq, evaluate_mcq_with_partial_marking, evaluate_true_false, direct_match
-
+from utils.quiz_report import generate_quiz_report, save_quiz_report
 load_dotenv()
 CACHE_EX = int(os.getenv('CACHE_EXPIRY', 3600))  # Cache expiry time in seconds
 
@@ -113,7 +113,7 @@ async def set_quiz_response(cursor,conn, response: dict):
     await asyncio.to_thread(
         cursor.execute,
         """UPDATE "QuizResult" 
-           SET "responses" = %s, "score" = %s, "totalScore" = %s, isEvaluated = TRUE
+           SET "responses" = %s, "score" = %s, "totalScore" = %s, "isEvaluated" = 'EVALUATED'
            WHERE "id" = %s""",
         (json.dumps(response["responses"]), response["score"], response["totalScore"], response["id"])
     )
@@ -179,7 +179,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     questions = get_all_questions(mongo_db=mongo_db, redis_client=redis_client, quiz_id=quiz_id,
                                   save_to_file=save_to_file)
 
-    evaluation_settings = get_evaluation_settings(pg_cursor, quiz_id) or {}
+    evaluation_settings = get_evaluation_settings(pg_cursor, quiz_id) or {} #TODO: Moce this to a class instead of a function
     print(f"Settings for quiz {quiz_id}: {evaluation_settings!r}")
     negative_marking = evaluation_settings.get("negativeMark", False)
     mcq_partial_marking = evaluation_settings.get("mcqPartialMark", False)
@@ -308,7 +308,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'score', fitb_score)
 
                     case _:
-                        print(f"Question type '{question.get('type')!r}' is not found")
+                        print(f"Question type {question.get('type')=!r} is not found")
 
             # Calculate total score
             quiz_result["score"] = sum([
@@ -319,11 +319,13 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             # Save result back to database
             await set_quiz_response(pg_cursor, pg_conn, quiz_result)
     finally:
-        # Set Quiz isEvaluated = TRUE
+        # Get quiz report
+        quiz_report = await generate_quiz_report(quiz_id, quiz_responses, questions)
+        await save_quiz_report(quiz_id, quiz_report, pg_cursor, pg_conn, save_to_file)
         pg_cursor.execute(
-        """UPDATE "Quiz" SET "isEvaluated" = TRUE WHERE "id" = %s""",
+        """UPDATE "Quiz" SET "isEvaluated" = 'EVALUATED' WHERE "id" = %s""",
         (quiz_id,))
-        pg_conn.commit
+        pg_conn.commit()
         if save_to_file:
             try:
                 with open(f'data/json/{quiz_id}_quiz_responses_evaluated.json', 'w') as f:
