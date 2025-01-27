@@ -31,6 +31,7 @@ markDistribution = {
 from typing import Any, Dict, List
 import json
 import asyncio
+import uuid
 
 async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]], questions: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
@@ -93,9 +94,9 @@ async def save_quiz_report(quiz_id: str, report: Dict[str, Any], cursor, conn, s
     await asyncio.to_thread(
         cursor.execute,
         """INSERT INTO "QuizReport" (
-            "quizId", "maxScore", "avgScore", "minScore", 
-            "totalScore", "totalStudents", "questionStats", "markDistribution"
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            "id", "quizId", "maxScore", "avgScore", "minScore", 
+            "totalScore", "totalStudents", "questionStats", "markDistribution", "evaluatedAt"
+        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
         ON CONFLICT ("quizId") 
         DO UPDATE SET 
             "maxScore" = EXCLUDED."maxScore",
@@ -104,9 +105,11 @@ async def save_quiz_report(quiz_id: str, report: Dict[str, Any], cursor, conn, s
             "totalScore" = EXCLUDED."totalScore",
             "totalStudents" = EXCLUDED."totalStudents",
             "questionStats" = EXCLUDED."questionStats",
-            "markDistribution" = EXCLUDED."markDistribution"
+            "markDistribution" = EXCLUDED."markDistribution",
+            "evaluatedAt" = NOW()
         """,
         (
+            uuid.uuid4().hex,
             quiz_id,
             report['maxScore'],
             report['avgScore'],
@@ -114,7 +117,7 @@ async def save_quiz_report(quiz_id: str, report: Dict[str, Any], cursor, conn, s
             report['totalScore'],
             report['totalStudents'],
             json.dumps(report['questionStats']),
-            json.dumps(report['markDistribution'])
+            json.dumps(report['markDistribution']),
         )
     )
     await asyncio.to_thread(conn.commit)
