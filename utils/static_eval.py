@@ -22,6 +22,8 @@ async def evaluate_mcq_with_partial_marking(student_answers: List[str], correct_
     
 
 async def evaluate_true_false(student_answer: str, correct_answer: str, total_score: float) -> float:
+    if isinstance(correct_answer, list):
+        correct_answer = correct_answer[0]
     if student_answer == correct_answer:
         return total_score
     else:

@@ -42,10 +42,14 @@ async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]],
     :return: Quiz report
     """
     scores = [result['score'] for result in quiz_results]
-    total_score = sum(scores)
-    avg_score = total_score / len(scores)
+    total_score = set(result['totalScore'] for result in quiz_results)
+    if len(total_score) > 1:
+        print(f"Warning: Multiple total scores found for quiz results for {quiz_id=!r}")
+    total_score = total_score.pop()
+    avg_score = sum(scores) / len(scores)
     max_score = max(scores)
     min_score = min(scores)
+    normalized_scores = [(score / total_score) * 100 for score in scores]
 
     question_stats = []
     for question in questions:
@@ -64,10 +68,10 @@ async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]],
         })
 
     mark_distribution = {
-        'excellent': sum(1 for score in scores if 80 <= score <= 100),
-        'good': sum(1 for score in scores if 60 <= score <= 79),
-        'average': sum(1 for score in scores if 40 <= score <= 59),
-        'poor': sum(1 for score in scores if 0 <= score <= 39)
+        'excellent': sum(1 for score in normalized_scores if 80 <= score <= 100),
+        'good': sum(1 for score in normalized_scores if 60 <= score <= 79),
+        'average': sum(1 for score in normalized_scores if 40 <= score <= 59),
+        'poor': sum(1 for score in normalized_scores if 0 <= score <= 39)
     }
 
     return {
@@ -76,7 +80,7 @@ async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]],
         'maxScore': max_score,
         'minScore': min_score,
         'totalScore': total_score,
-        'totalStudents': len(scores),
+        'totalStudents': len(quiz_results),
         'questionStats': question_stats,
         'markDistribution': mark_distribution
     }
