@@ -116,7 +116,7 @@ async def set_quiz_response(cursor,conn, response: dict):
            SET "responses" = %s, "score" = %s, "totalScore" = %s, "isEvaluated" = 'EVALUATED'
            WHERE "id" = %s""",
         (json.dumps(response["responses"]), response["score"], response["totalScore"], response["id"])
-    )
+    ) #TODO: Update query to check if isSubmitted is True
     await asyncio.to_thread(conn.commit)
 
 def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=True):
@@ -178,6 +178,11 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                         save_to_file=save_to_file)
     questions = get_all_questions(mongo_db=mongo_db, redis_client=redis_client, quiz_id=quiz_id,
                                   save_to_file=save_to_file)
+
+    if len(questions) == 0:
+        raise ValueError(f"No questions found for quiz {quiz_id}")
+    if len(quiz_responses) == 0:
+        raise ValueError(f"No responses found for quiz {quiz_id}")
 
     evaluation_settings = get_evaluation_settings(pg_cursor, quiz_id) or {} #TODO: Moce this to a class instead of a function
     print(f"Settings for quiz {quiz_id}: {evaluation_settings!r}")
@@ -244,13 +249,13 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                             }
                         else:
                             current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, None))
-                            question_guidelines = await question.get("guidelines",
-                                                                     get_guidelines(redis_client=redis_client,
+                            question_guidelines = question.get("guidelines",
+                                                                     await get_guidelines(redis_client=redis_client,
                                                                                     question_id=qid,
                                                                                     llm=current_llm,
                                                                                     question=clean_question,
                                                                                     expected_answer=question[
-                                                                                        "explanation"],
+                                                                                        "expectedAnswer"],
                                                                                     total_score=question_total_score))
                             for i in range(10):  # Catch silent errors
                                 score_res = await score(
@@ -298,9 +303,9 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                          if negative_marking and tf_score <= 0
                                                          else 0)
 
-                    case "FILL_IN_THE_BLANK":
+                    case "FILL_IN_BLANK":
                         response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
-                        correct_answer = question["answer"]
+                        correct_answer = question["expectedAnswer"]
                         if await direct_match(response, correct_answer, strip=True, case_sensitive=False):
                             fitb_score = question_total_score
                         else: 
@@ -343,7 +348,7 @@ if __name__ == "__main__":
     my_mongo_db = get_mongo_client()
     my_redis_client = get_redis_client()
 
-    my_quiz_id = "cm65yjwna0006xydnis96mbwm"
+    my_quiz_id = "cm64ucvy80015xy0kvcg3ubno"
     # Evaluate quiz responses
     asyncio.run(bulk_evaluate_quiz_responses(
         quiz_id=my_quiz_id,
