@@ -240,7 +240,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         clean_question = remove_html_tags(question['question']).strip()
                         student_answer = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
 
-                        if await direct_match(student_answer, question["explanation"], strip=True,
+                        if await direct_match(student_answer, question["expectedAnswer"], strip=True,
                                               case_sensitive=False):
                             score_res = {
                                 "score": question_total_score,
@@ -263,7 +263,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                     question=clean_question,
                                     student_ans=student_answer,
                                     # TODO: What the...? Why are we joining the answers?
-                                    expected_ans=" ".join(question["explanation"]),
+                                    expected_ans=" ".join(question["expectedAnswer"]),
                                     total_score=question_total_score,
                                     guidelines=question_guidelines
                                 )
