@@ -1,3 +1,5 @@
+"""This module contains a simple logger for evaluation results"""
+
 import json
 import logging
 from datetime import datetime
@@ -27,4 +29,4 @@ def log_evaluation(test_name, params, result):
         "parameters": params,
         "result": result
     }
-    logger.info(json.dumps(log_entry, indent=2))
+    logger.info(json.dumps(log_entry, indent=2)) #TODO: Add better logging

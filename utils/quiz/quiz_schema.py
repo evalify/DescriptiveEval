@@ -1,7 +1,39 @@
+"""This module provides abstraction for schemas"""
+
 from typing import Any, Dict, Optional
 
 
 class QuizResponseSchema:
+    """Schema for quiz responses. Serves as abstraction for response data"""
+    @classmethod
+    def get_attribute(cls, response_data: Dict[str, Any], question_id: str, attribute: str) -> Any:
+        """Router function for getting attributes"""
+        getter_map = {
+            'student_answer': cls.get_student_answer,
+            'score': cls.get_score,
+            'negative_score': cls.get_negative_score,
+            'remarks': cls.get_remarks,
+            'breakdown': cls.get_breakdown
+        }
+        if attribute not in getter_map:
+            raise ValueError(f"Invalid attribute: {attribute}")
+
+        return getter_map[attribute](response_data, question_id)
+
+    @classmethod
+    def set_attribute(cls, response_data: Dict[str, Any], question_id: str, attribute: str, value: Any) -> None:
+        """Router function for setting attributes"""
+        setter_map = {
+            'student_answer': cls.set_student_answer,
+            'score': cls.set_score,
+            'negative_score': cls.set_negative_score,
+            'remarks': cls.set_remarks,
+            'breakdown': cls.set_breakdown
+        }
+        if attribute not in setter_map:
+            raise ValueError(f"Invalid attribute: {attribute}")
+
+        setter_map[attribute](response_data, question_id, value)
 
     @staticmethod
     def get_student_answer(response_data: Dict[str, Any], question_id: str) -> Any:
@@ -62,34 +94,3 @@ class QuizResponseSchema:
         if question_id not in response_data["responses"]:
             response_data["responses"][question_id] = {}
         response_data["responses"][question_id]["breakdown"] = value
-
-    @classmethod
-    def get_attribute(cls, response_data: Dict[str, Any], question_id: str, attribute: str) -> Any:
-        """Router function for getting attributes"""
-
-        getter_map = {
-            'student_answer': cls.get_student_answer,
-            'score': cls.get_score,
-            'negative_score': cls.get_negative_score,
-            'remarks': cls.get_remarks,
-            'breakdown': cls.get_breakdown
-        }
-        if attribute not in getter_map:
-            raise ValueError(f"Invalid attribute: {attribute}")
-
-        return getter_map[attribute](response_data, question_id)
-
-    @classmethod
-    def set_attribute(cls, response_data: Dict[str, Any], question_id: str, attribute: str, value: Any) -> None:
-        """Router function for setting attributes"""
-        setter_map = {
-            'student_answer': cls.set_student_answer,
-            'score': cls.set_score,
-            'negative_score': cls.set_negative_score,
-            'remarks': cls.set_remarks,
-            'breakdown': cls.set_breakdown
-        }
-        if attribute not in setter_map:
-            raise ValueError(f"Invalid attribute: {attribute}")
-
-        setter_map[attribute](response_data, question_id, value)

@@ -1,3 +1,5 @@
+"""This module contains utility functions for evaluating coding questions"""
+
 import json
 import os
 import re

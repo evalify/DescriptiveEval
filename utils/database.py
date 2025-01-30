@@ -1,3 +1,5 @@
+"""This module contains functions to interact with databases (Postgres, MongoDB, Redis)"""
+
 import os
 from typing import Tuple
 

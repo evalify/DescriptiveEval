@@ -1,4 +1,7 @@
 """"
+This module contains functions to generate and save a report for a quiz.
+
+The report includes the following data:
 Quiz Report:  {
                 quizId,
                 avgScore,
@@ -9,7 +12,7 @@ Quiz Report:  {
                 questionStats,
                 markDistribution
             }
-
+where, 
 questionStats:  [{
                 questionId,
                 questionText: question.question,

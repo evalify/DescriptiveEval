@@ -1,3 +1,5 @@
+"""This module contains simple utility functions"""
+
 import json
 import re
 from datetime import datetime

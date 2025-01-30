@@ -18,11 +18,12 @@ from redis import Redis
 from tqdm import tqdm
 
 from model import score, LLMProvider, get_llm, generate_guidelines
-from utils.code_eval import evaluate_coding_question
+from utils.evaluation.code_eval import evaluate_coding_question
 from utils.misc import DateTimeEncoder, remove_html_tags
-from utils.schema_utils import QuizResponseSchema
-from utils.static_eval import evaluate_mcq, evaluate_mcq_with_partial_marking, evaluate_true_false, direct_match
-from utils.quiz_report import generate_quiz_report, save_quiz_report
+from utils.quiz.quiz_report import generate_quiz_report, save_quiz_report
+from utils.quiz.quiz_schema import QuizResponseSchema
+from utils.evaluation.static_eval import evaluate_mcq, evaluate_mcq_with_partial_marking, evaluate_true_false, direct_match
+
 load_dotenv()
 CACHE_EX = int(os.getenv('CACHE_EXPIRY', 3600))  # Cache expiry time in seconds
 
@@ -109,15 +110,17 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
 
     return quiz_responses
 
-async def set_quiz_response(cursor,conn, response: dict):
+
+async def set_quiz_response(cursor, conn, response: dict):
     await asyncio.to_thread(
         cursor.execute,
         """UPDATE "QuizResult" 
            SET "responses" = %s, "score" = %s, "totalScore" = %s, "isEvaluated" = 'EVALUATED'
            WHERE "id" = %s""",
         (json.dumps(response["responses"]), response["score"], response["totalScore"], response["id"])
-    ) #TODO: Update query to check if isSubmitted is True
+    )  # TODO: Update query to check if isSubmitted is True
     await asyncio.to_thread(conn.commit)
+
 
 def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=True):
     """
@@ -184,7 +187,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     if len(quiz_responses) == 0:
         raise ValueError(f"No responses found for quiz {quiz_id}")
 
-    evaluation_settings = get_evaluation_settings(pg_cursor, quiz_id) or {} #TODO: Moce this to a class instead of a function
+    evaluation_settings = get_evaluation_settings(pg_cursor,
+                                                  quiz_id) or {}  # TODO: Move this to a class instead of a function
     print(f"Settings for quiz {quiz_id}: {evaluation_settings!r}")
     negative_marking = evaluation_settings.get("negativeMark", False)
     mcq_partial_marking = evaluation_settings.get("mcqPartialMark", False)
@@ -226,7 +230,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         student_answers = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')
                         correct_answers = question["answer"]
                         if mcq_partial_marking:
-                            mcq_score = await evaluate_mcq_with_partial_marking(student_answers, correct_answers, question_total_score)
+                            mcq_score = await evaluate_mcq_with_partial_marking(student_answers, correct_answers,
+                                                                                question_total_score)
                         else:
                             mcq_score = await evaluate_mcq(student_answers, correct_answers, question_total_score)
 
@@ -234,7 +239,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score',
                                                          question.get("negativeMark", -1)
                                                          if negative_marking and mcq_score <= 0
-                                                         else 0) #TODO: Partial marking for MCQ
+                                                         else 0)  # TODO: Partial marking for MCQ
 
                     case "DESCRIPTIVE":
                         clean_question = remove_html_tags(question['question']).strip()
@@ -250,7 +255,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         else:
                             current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, None))
                             question_guidelines = question.get("guidelines",
-                                                                     await get_guidelines(redis_client=redis_client,
+                                                               await get_guidelines(redis_client=redis_client,
                                                                                     question_id=qid,
                                                                                     llm=current_llm,
                                                                                     question=clean_question,
@@ -308,8 +313,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         correct_answer = question["expectedAnswer"]
                         if await direct_match(response, correct_answer, strip=True, case_sensitive=False):
                             fitb_score = question_total_score
-                        else: 
-                            fitb_score = 0 # TODO: Implement LLM Scoring for Fill in the Blanks
+                        else:
+                            fitb_score = 0  # TODO: High-Priority - Implement LLM Scoring for Fill in the Blanks
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'score', fitb_score)
 
                     case _:
@@ -320,7 +325,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 QuizResponseSchema.get_attribute(quiz_result, qid, 'score') + (
                         QuizResponseSchema.get_attribute(quiz_result, qid, 'negative_score') or 0)
                 for qid in quiz_result["responses"].keys()])
-            
+
             # Save result back to database
             await set_quiz_response(pg_cursor, pg_conn, quiz_result)
     finally:
@@ -328,8 +333,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         quiz_report = await generate_quiz_report(quiz_id, quiz_responses, questions)
         await save_quiz_report(quiz_id, quiz_report, pg_cursor, pg_conn, save_to_file)
         pg_cursor.execute(
-        """UPDATE "Quiz" SET "isEvaluated" = 'EVALUATED' WHERE "id" = %s""",
-        (quiz_id,))
+            """UPDATE "Quiz" SET "isEvaluated" = 'EVALUATED' WHERE "id" = %s""",
+            (quiz_id,))
         pg_conn.commit()
         if save_to_file:
             try:

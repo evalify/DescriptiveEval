@@ -9,7 +9,7 @@ from langchain_ollama import OllamaLLM
 
 load_dotenv()
 
-from utils.templates import evaluation_template, guidelines_template, qa_enhancement_template
+from utils.evaluation.templates import evaluation_template, guidelines_template, qa_enhancement_template
 
 
 class LLMProvider(Enum):

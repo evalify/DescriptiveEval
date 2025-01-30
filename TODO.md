@@ -27,13 +27,14 @@
 - [x] Add backward compatability for old schema (where quiz_result)
 - [x] Add isEvaluated in Quiz & QuizResult
 - [x] Partial Marking for MCQs
-- [ ] Add QuizReport aka Statistics - follow schema refer [route](https://github.com/Aksaykanthan/evalify/blob/main/src/app/api/staff/result/route.ts)
-- [ ] Check out VideoPoet
+- [x] Add QuizReport aka Statistics - follow schema refer [route](https://github.com/Aksaykanthan/evalify/blob/main/src/app/api/staff/result/route.ts)
+- [ ] Add model selection support
+- [ ] Add API for retrieving available models (Hard-Coded but validated from list of available models in ollama)
+- [ ] Add support thinking model support for Evaluator-LLM
+- [ ] Add Queue Management for Evaluation
 
 ## Medium Priority
 
-- [ ] Add model selection support
-- [ ] Add API for retrieving available models
 - [ ] Add Get Route for /status retrival
   1. Unevaluated
   2. Pending
@@ -44,11 +45,12 @@
 
 ## Low Priority
 
+- [ ] Write Documentation
+- [ ] Check out VideoPoet
+- [ ] Update README.md
 - [ ] Add strict checking/case sensitivity support - flags from mongodb question settings (strictMatch)
 - [ ] Partial marking/Absolute marking for Coding questions
 - [ ] Add support for LiteLLM
-- [ ] Add support thinking model support for Evaluator-LLM
-- [ ] Add Queue Management for Evaluation
 - [x] Setup openwebui in EvalifyVM
 
 ## Future Considerations

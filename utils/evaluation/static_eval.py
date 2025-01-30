@@ -1,3 +1,5 @@
+"""This module contains functions to evaluate student responses"""
+
 from typing import List
 
 async def evaluate_mcq(student_answers: List[str], correct_answers: List[str], total_score: float) -> float:
