@@ -75,7 +75,11 @@ Include that this evaluation rubric will be used for evaluating the student's an
 which will be evaluated using the score breakdown suggested by the 'evaluation criteria'.
 Define the scoring approach for each criterion.
 
+
 {format_instructions}
+
+To be clear, you need to output json in type {{'guidelines': 'insert guidelines here'}}.
+All criteria should be in this str and in proper markdown format.
 """
 
 qa_enhancement_template = """

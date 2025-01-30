@@ -11,6 +11,7 @@ from typing import List, Dict, Any, Optional
 from dotenv import load_dotenv
 from redis import Redis
 from tqdm import tqdm
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 # Custom imports
 from model import score, LLMProvider, get_llm, generate_guidelines, score_fill_in_blank
@@ -271,115 +272,129 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 )
             groq_api_keys = itertools.cycle(valid_keys)
             logger.info(f"Using {len(valid_keys)} API keys in rotation for evaluation")
+        with logging_redirect_tqdm(loggers=[logger]):
+            for quiz_result in tqdm(quiz_responses, desc="Evaluating quiz responses"):
+                if quiz_result.get("isEvaluated") == 'EVALUATED':
+                    if not override_evaluated:
+                        logger.info(f"Skipping evaluation for already evaluated quiz response {quiz_result['id']}")
+                        continue
+                    logger.info(f"Re-evaluating quiz response {quiz_result['id']}")
+                quiz_result["totalScore"] = 0
+                for question in questions:
+                    qid = str(question["_id"])
+                    
+                    # Handle old schema conversion
+                    if isinstance(quiz_result["responses"].get(qid), list):
+                        quiz_result["responses"][qid] = {
+                            "student_answer": quiz_result["responses"][qid],
+                        }
+                        if "questionMarks" in quiz_result:
+                            del quiz_result["questionMarks"]
+                    
+                    # Validate question marks
+                    try:
+                        if question.get("marks") is not None:
+                            question["mark"] = question["marks"]
+                        question_total_score = question["mark"]
+                        quiz_result["totalScore"] += question_total_score
+                    except KeyError as e:
+                        raise InvalidQuestionError(
+                            f"Question {qid} is missing required 'mark'/'marks' attribute.\n"
+                            f"Question data: {json.dumps(question, indent=2)}"
+                        )
 
-        for quiz_result in tqdm(quiz_responses, desc="Evaluating quiz responses"):
-            if quiz_result.get("isEvaluated") == 'EVALUATED':
-                if not override_evaluated:
-                    logger.info(f"Skipping evaluation for already evaluated quiz response {quiz_result['id']}")
-                    continue
-                logger.info(f"Re-evaluating quiz response {quiz_result['id']}")
-            quiz_result["totalScore"] = 0
-            for question in questions:
-                qid = str(question["_id"])
-                
-                # Handle old schema conversion
-                if isinstance(quiz_result["responses"].get(qid), list):
-                    quiz_result["responses"][qid] = {
-                        "student_answer": quiz_result["responses"][qid],
-                    }
-                    if "questionMarks" in quiz_result:
-                        del quiz_result["questionMarks"]
-                
-                # Validate question marks
-                try:
-                    if question.get("marks") is not None:
-                        question["mark"] = question["marks"]
-                    question_total_score = question["mark"]
-                    quiz_result["totalScore"] += question_total_score
-                except KeyError as e:
-                    raise InvalidQuestionError(
-                        f"Question {qid} is missing required 'mark'/'marks' attribute.\n"
-                        f"Question data: {json.dumps(question, indent=2)}"
-                    )
+                    if qid not in quiz_result["responses"]:
+                        continue
 
-                if qid not in quiz_result["responses"]:
-                    continue
+                    # Question type specific evaluation
+                    try:
+                        match question.get("type", "").upper():
+                            case "MCQ":
+                                student_answers = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')
+                                if not student_answers:
+                                    logger.warning(f"Empty response for MCQ question {qid}")
+                                    QuizResponseSchema.set_attribute(quiz_result, qid, 'score', 0)
+                                    QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', 'No answer provided')
+                                    continue
 
-                # Question type specific evaluation
-                try:
-                    match question.get("type", "").upper():
-                        case "MCQ":
-                            student_answers = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')
-                            if not student_answers:
-                                logger.warning(f"Empty response for MCQ question {qid}")
-                                QuizResponseSchema.set_attribute(quiz_result, qid, 'score', 0)
-                                QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', 'No answer provided')
-                                continue
-
-                            correct_answers = question.get("answer")
-                            if not correct_answers:
-                                raise InvalidQuestionError(
-                                    f"Question {qid} is missing correct answer.\n"
-                                    f"Question data: {json.dumps(question, indent=2)}"
-                                )
-
-                            try:
-                                if mcq_partial_marking:
-                                    mcq_score = await evaluate_mcq_with_partial_marking(
-                                        student_answers, correct_answers, question_total_score
-                                    )
-                                else:
-                                    mcq_score = await evaluate_mcq(
-                                        student_answers, correct_answers, question_total_score
+                                correct_answers = question.get("answer")
+                                if not correct_answers:
+                                    raise InvalidQuestionError(
+                                        f"Question {qid} is missing correct answer.\n"
+                                        f"Question data: {json.dumps(question, indent=2)}"
                                     )
 
-                                QuizResponseSchema.set_attribute(quiz_result, qid, 'score', mcq_score)
-                                if negative_marking and mcq_score <= 0:
-                                    neg_score = question.get("negativeMark", -question_total_score/2)
-                                    QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score', neg_score)
-                                    logger.info(f"Applied negative marking ({neg_score}) for incorrect MCQ answer in {qid}")
-                                else:
-                                    QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score', 0)
-
-                            except Exception as e:
-                                logger.error(f"MCQ evaluation failed for question {qid}", exc_info=True)
-                                raise MCQEvaluationError(qid, student_answers, correct_answers)
-
-                        case "DESCRIPTIVE":
-                            clean_question = remove_html_tags(question['question']).strip()
-                            student_answer = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
-
-                            if await direct_match(student_answer, question["expectedAnswer"], strip=True, case_sensitive=False):
-                                score_res = {
-                                    "score": question_total_score,
-                                    "reason": "Exact Match",
-                                    "breakdown": "Exact Match - LLM not used"
-                                }
-                            else:
-                                current_llm = llm if llm else get_llm(LLMProvider.GROQ, next(groq_api_keys))
-                                question_guidelines = await get_guidelines(
-                                    redis_client=redis_client,
-                                    question_id=qid,
-                                    llm=current_llm,
-                                    question=clean_question,
-                                    expected_answer=question["expectedAnswer"],
-                                    total_score=question_total_score
-                                )
-                                
-                                errors = []
-                                for attempt in range(MAX_RETRIES):
-                                    try:
-                                        score_res = await score(
-                                            llm=current_llm,
-                                            question=clean_question,
-                                            student_ans=student_answer,
-                                            expected_ans=" ".join(question["expectedAnswer"]),
-                                            total_score=question_total_score,
-                                            guidelines=question_guidelines
+                                try:
+                                    if mcq_partial_marking:
+                                        mcq_score = await evaluate_mcq_with_partial_marking(
+                                            student_answers, correct_answers, question_total_score
                                         )
-                                        
-                                        if any(score_res[key].startswith("Error:") for key in ["breakdown", "rubric"]):
-                                            error_msg = f"LLM returned error response: {score_res}"
+                                    else:
+                                        mcq_score = await evaluate_mcq(
+                                            student_answers, correct_answers, question_total_score
+                                        )
+
+                                    QuizResponseSchema.set_attribute(quiz_result, qid, 'score', mcq_score)
+                                    if negative_marking and mcq_score <= 0:
+                                        neg_score = question.get("negativeMark", -question_total_score/2)
+                                        QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score', neg_score)
+                                        # logger.info(f"Applied negative marking ({neg_score}) for incorrect MCQ answer in {qid}")
+                                    else:
+                                        QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score', 0)
+
+                                except Exception as e:
+                                    logger.error(f"MCQ evaluation failed for question {qid}", exc_info=True)
+                                    raise MCQEvaluationError(qid, student_answers, correct_answers)
+
+                            case "DESCRIPTIVE":
+                                clean_question = remove_html_tags(question['question']).strip()
+                                student_answer = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
+
+                                if await direct_match(student_answer, question["expectedAnswer"], strip=True, case_sensitive=False):
+                                    score_res = {
+                                        "score": question_total_score,
+                                        "reason": "Exact Match",
+                                        "breakdown": "Exact Match - LLM not used"
+                                    }
+                                else:
+                                    current_llm = llm if llm else get_llm(LLMProvider.GROQ, next(groq_api_keys))
+                                    question_guidelines = await get_guidelines(
+                                        redis_client=redis_client,
+                                        question_id=qid,
+                                        llm=current_llm,
+                                        question=clean_question,
+                                        expected_answer=question["expectedAnswer"],
+                                        total_score=question_total_score
+                                    )
+                                    
+                                    errors = []
+                                    for attempt in range(MAX_RETRIES):
+                                        try:
+                                            score_res = await score(
+                                                llm=current_llm,
+                                                question=clean_question,
+                                                student_ans=student_answer,
+                                                expected_ans=" ".join(question["expectedAnswer"]),
+                                                total_score=question_total_score,
+                                                guidelines=question_guidelines
+                                            )
+                                            
+                                            if any(score_res[key].startswith("Error:") for key in ["breakdown", "rubric"]):
+                                                error_msg = f"LLM returned error response: {score_res}"
+                                                logger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}")
+                                                errors.append(error_msg)
+                                                
+                                                if not llm:
+                                                    current_llm = get_llm(
+                                                        LLMProvider.GROQ,
+                                                        next(groq_api_keys),
+                                                        'llama-3.3-70b-versatile' if attempt > 5 else None
+                                                    )
+                                                continue
+                                                
+                                            break
+                                        except Exception as e:
+                                            error_msg = f"Unexpected error during scoring: {str(e)}"
                                             logger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}")
                                             errors.append(error_msg)
                                             
@@ -389,128 +404,134 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                     next(groq_api_keys),
                                                     'llama-3.3-70b-versatile' if attempt > 5 else None
                                                 )
-                                            continue
-                                            
-                                        break
-                                    except Exception as e:
-                                        error_msg = f"Unexpected error during scoring: {str(e)}"
-                                        logger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}")
-                                        errors.append(error_msg)
-                                        
-                                        if not llm:
-                                            current_llm = get_llm(
-                                                LLMProvider.GROQ,
-                                                next(groq_api_keys),
-                                                'llama-3.3-70b-versatile' if attempt > 5 else None
-                                            )
-                                else:
-                                    error_details = "\n".join(errors)
-                                    raise LLMEvaluationError(
-                                        f"Failed to evaluate response after {MAX_RETRIES} attempts.\n"
-                                        f"Quiz ID: {quiz_id}\n"
-                                        f"Question ID: {qid}\n"
-                                        f"Student Answer: {student_answer[:100]}...\n"
-                                        f"Errors encountered:\n{error_details}"
-                                    )
-
-                            QuizResponseSchema.set_attribute(quiz_result, qid, 'score', score_res["score"])
-                            QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', score_res['reason'])
-                            QuizResponseSchema.set_attribute(quiz_result, qid, 'breakdown', score_res["breakdown"])
-
-                        case "CODING":
-                            response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')
-                            if not response:
-                                logger.warning(f"Empty response for coding question {qid}")
-                                QuizResponseSchema.set_attribute(quiz_result, qid, 'score', 0)
-                                QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', 'No code submitted')
-                                continue
-
-                            driver_code = question.get("driverCode")
-                            test_cases = question.get("testcases", [])
-                            if not driver_code or not test_cases:
-                                raise InvalidQuestionError(
-                                    f"Question {qid} is missing driver code or test cases.\n"
-                                    f"Question data: {json.dumps(question, indent=2)}"
-                                )
-
-                            try:
-                                coding_score, eval_result = await evaluate_coding_question(
-                                    student_response=response[0],
-                                    driver_code=driver_code,
-                                    test_cases_count=len(test_cases)
-                                )
-                                QuizResponseSchema.set_attribute(quiz_result, qid, 'score', coding_score)
-                                if eval_result:  # Add execution result as remarks if available
-                                    QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', eval_result)
-                            except Exception as e:
-                                logger.error(f"Coding evaluation failed for question {qid}", exc_info=True)
-                                raise CodingEvaluationError(qid, str(e), len(test_cases))
-
-                        case "TRUE_FALSE":
-                            response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')
-                            if not response:
-                                logger.warning(f"Empty response for True/False question {qid}")
-                                QuizResponseSchema.set_attribute(quiz_result, qid, 'score', 0)
-                                QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', 'No answer provided')
-                                continue
-
-                            correct_answer = question.get("answer")
-                            if correct_answer is None:
-                                raise InvalidQuestionError(
-                                    f"Question {qid} is missing correct answer.\n"
-                                    f"Question data: {json.dumps(question, indent=2)}"
-                                )
-
-                            try:
-                                tf_score = await evaluate_true_false(response[0], correct_answer, question_total_score)
-                                QuizResponseSchema.set_attribute(quiz_result, qid, 'score', tf_score)
-                                if negative_marking and tf_score <= 0:
-                                    neg_score = question.get("negativeMark", -question_total_score/2)
-                                    QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score', neg_score)
-                                    logger.info(f"Applied negative marking ({neg_score}) for incorrect True/False answer in {qid}")
-                                else:
-                                    QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score', 0)
-                            except Exception as e:
-                                logger.error(f"True/False evaluation failed for question {qid}", exc_info=True)
-                                raise TrueFalseEvaluationError(qid, response[0], correct_answer)
-
-                        case "FILL_IN_BLANK":
-                            response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
-                            if not response:
-                                logger.warning(f"Empty response for fill in blank question {qid}")
-                                QuizResponseSchema.set_attribute(quiz_result, qid, 'score', 0)
-                                QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', 'No answer provided')
-                                continue
-
-                            correct_answer = question.get("expectedAnswer")
-                            if not correct_answer:
-                                raise InvalidQuestionError(
-                                    f"Question {qid} is missing expected answer.\n"
-                                    f"Question data: {json.dumps(question, indent=2)}"
-                                )
-
-                            if await direct_match(response, correct_answer, strip=True, case_sensitive=False):
-                                fitb_score = {
-                                    'score': question_total_score,
-                                    'reason': 'Exact Match'
-                                }
-                            else:
-                                current_llm = llm if llm else get_llm(LLMProvider.GROQ, next(groq_api_keys))
-                                clean_question = remove_html_tags(question['question']).strip()
-                                
-                                evaluation_attempts = []
-                                for attempt in range(MAX_RETRIES):
-                                    try:
-                                        fitb_score = await score_fill_in_blank(
-                                            llm=current_llm,
-                                            question=clean_question,
-                                            student_ans=response,
-                                            expected_ans=correct_answer,
-                                            total_score=question_total_score,
+                                    else:
+                                        error_details = "\n".join(errors)
+                                        raise LLMEvaluationError(
+                                            f"Failed to evaluate response after {MAX_RETRIES} attempts.\n"
+                                            f"Quiz ID: {quiz_id}\n"
+                                            f"Question ID: {qid}\n"
+                                            f"Student Answer: {student_answer[:100]}...\n"
+                                            f"Errors encountered:\n{error_details}"
                                         )
 
-                                        if fitb_score is None or fitb_score.get('reason', '').startswith("Error:"):
-                                            error_msg = fitb_score.get('reason') if fitb_score else "No response from LLM"
+                                QuizResponseSchema.set_attribute(quiz_result, qid, 'score', score_res["score"])
+                                QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', score_res['reason'])
+                                QuizResponseSchema.set_attribute(quiz_result, qid, 'breakdown', score_res["breakdown"])
+
+                            case "CODING":
+                                response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')
+                                if not response:
+                                    logger.warning(f"Empty response for coding question {qid}")
+                                    QuizResponseSchema.set_attribute(quiz_result, qid, 'score', 0)
+                                    QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', 'No code submitted')
+                                    continue
+
+                                driver_code = question.get("driverCode")
+                                test_cases = question.get("testcases", [])
+                                if not driver_code or not test_cases:
+                                    raise InvalidQuestionError(
+                                        f"Question {qid} is missing driver code or test cases.\n"
+                                        f"Question data: {json.dumps(question, indent=2)}"
+                                    )
+
+                                try:
+                                    coding_score, eval_result = await evaluate_coding_question(
+                                        student_response=response[0],
+                                        driver_code=driver_code,
+                                        test_cases_count=len(test_cases)
+                                    )
+                                    QuizResponseSchema.set_attribute(quiz_result, qid, 'score', coding_score)
+                                    if eval_result:  # Add execution result as remarks if available
+                                        QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', eval_result)
+                                except Exception as e:
+                                    logger.error(f"Coding evaluation failed for question {qid}", exc_info=True)
+                                    raise CodingEvaluationError(qid, str(e), len(test_cases))
+
+                            case "TRUE_FALSE":
+                                response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')
+                                if not response:
+                                    logger.warning(f"Empty response for True/False question {qid}")
+                                    QuizResponseSchema.set_attribute(quiz_result, qid, 'score', 0)
+                                    QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', 'No answer provided')
+                                    continue
+
+                                correct_answer = question.get("answer")
+                                if correct_answer is None:
+                                    raise InvalidQuestionError(
+                                        f"Question {qid} is missing correct answer.\n"
+                                        f"Question data: {json.dumps(question, indent=2)}"
+                                    )
+
+                                try:
+                                    tf_score = await evaluate_true_false(response[0], correct_answer, question_total_score)
+                                    QuizResponseSchema.set_attribute(quiz_result, qid, 'score', tf_score)
+                                    if negative_marking and tf_score <= 0:
+                                        neg_score = question.get("negativeMark", -question_total_score/2)
+                                        QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score', neg_score)
+                                        # logger.info(f"Applied negative marking ({neg_score}) for incorrect True/False answer in {qid}")
+                                    else:
+                                        QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score', 0)
+                                except Exception as e:
+                                    logger.error(f"True/False evaluation failed for question {qid}", exc_info=True)
+                                    raise TrueFalseEvaluationError(qid, response[0], correct_answer)
+
+                            case "FILL_IN_BLANK":
+                                response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
+                                if not response:
+                                    logger.warning(f"Empty response for fill in blank question {qid}")
+                                    QuizResponseSchema.set_attribute(quiz_result, qid, 'score', 0)
+                                    QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', 'No answer provided')
+                                    continue
+
+                                correct_answer = question.get("expectedAnswer")
+                                if not correct_answer:
+                                    raise InvalidQuestionError(
+                                        f"Question {qid} is missing expected answer.\n"
+                                        f"Question data: {json.dumps(question, indent=2)}"
+                                    )
+
+                                if await direct_match(response, correct_answer, strip=True, case_sensitive=False):
+                                    fitb_score = {
+                                        'score': question_total_score,
+                                        'reason': 'Exact Match'
+                                    }
+                                else:
+                                    current_llm = llm if llm else get_llm(LLMProvider.GROQ, next(groq_api_keys))
+                                    clean_question = remove_html_tags(question['question']).strip()
+                                    
+                                    evaluation_attempts = []
+                                    for attempt in range(MAX_RETRIES):
+                                        try:
+                                            fitb_score = await score_fill_in_blank(
+                                                llm=current_llm,
+                                                question=clean_question,
+                                                student_ans=response,
+                                                expected_ans=correct_answer,
+                                                total_score=question_total_score,
+                                            )
+
+                                            if fitb_score is None or fitb_score.get('reason', '').startswith("Error:"):
+                                                error_msg = fitb_score.get('reason') if fitb_score else "No response from LLM"
+                                                logger.warning(
+                                                    f"Attempt {attempt + 1}/{MAX_RETRIES} failed for question {qid}. "
+                                                    f"Error: {error_msg}"
+                                                )
+                                                evaluation_attempts.append({
+                                                    'error': error_msg,
+                                                    'model': current_llm.__class__.__name__
+                                                })
+                                                
+                                                if not llm:
+                                                    current_llm = get_llm(
+                                                        LLMProvider.GROQ,
+                                                        next(groq_api_keys),
+                                                        'llama-3.3-70b-versatile' if attempt > 5 else None
+                                                    )
+                                                continue
+                                            break
+                                            
+                                        except Exception as e:
+                                            error_msg = f"Unexpected error: {str(e)}"
                                             logger.warning(
                                                 f"Attempt {attempt + 1}/{MAX_RETRIES} failed for question {qid}. "
                                                 f"Error: {error_msg}"
@@ -526,53 +547,33 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                     next(groq_api_keys),
                                                     'llama-3.3-70b-versatile' if attempt > 5 else None
                                                 )
-                                            continue
-                                        break
-                                        
-                                    except Exception as e:
-                                        error_msg = f"Unexpected error: {str(e)}"
-                                        logger.warning(
-                                            f"Attempt {attempt + 1}/{MAX_RETRIES} failed for question {qid}. "
-                                            f"Error: {error_msg}"
-                                        )
-                                        evaluation_attempts.append({
-                                            'error': error_msg,
-                                            'model': current_llm.__class__.__name__
-                                        })
-                                        
-                                        if not llm:
-                                            current_llm = get_llm(
-                                                LLMProvider.GROQ,
-                                                next(groq_api_keys),
-                                                'llama-3.3-70b-versatile' if attempt > 5 else None
-                                            )
-                                else:
-                                    raise FillInBlankEvaluationError(qid, evaluation_attempts, MAX_RETRIES)
-                            
-                            QuizResponseSchema.set_attribute(quiz_result, qid, 'score', fitb_score["score"])
-                            QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', fitb_score['reason'])            
+                                    else:
+                                        raise FillInBlankEvaluationError(qid, evaluation_attempts, MAX_RETRIES)
+                                
+                                QuizResponseSchema.set_attribute(quiz_result, qid, 'score', fitb_score["score"])
+                                QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', fitb_score['reason'])            
 
-                        case _:
-                            logger.warning(f"Unhandled question type: {question.get('type')!r} for question {qid}")
+                            case _:
+                                logger.warning(f"Unhandled question type: {question.get('type')!r} for question {qid}")
 
-                except Exception as e:
-                    logger.error(
-                        f"Error evaluating question {qid} of type {question.get('type')}:\n"
-                        f"Error: {str(e)}\n"
-                        f"Question data: {json.dumps(question, indent=2)}\n"
-                        f"Response data: {json.dumps(quiz_result.get('responses', {}).get(qid), indent=2)}"
-                    )
-                    raise
+                    except Exception as e:
+                        logger.error(
+                            f"Error evaluating question {qid} of type {question.get('type')}:\n"
+                            f"Error: {str(e)}\n"
+                            f"Question data: {json.dumps(question, indent=2)}\n"
+                            f"Response data: {json.dumps(quiz_result.get('responses', {}).get(qid), indent=2)}"
+                        )
+                        raise
 
-            # Calculate total score including negative marking
-            quiz_result["score"] = sum([
-                QuizResponseSchema.get_attribute(quiz_result, qid, 'score') + 
-                (QuizResponseSchema.get_attribute(quiz_result, qid, 'negative_score') or 0)
-                for qid in quiz_result["responses"].keys()
-            ])
+                # Calculate total score including negative marking
+                quiz_result["score"] = sum([
+                    QuizResponseSchema.get_attribute(quiz_result, qid, 'score') + 
+                    (QuizResponseSchema.get_attribute(quiz_result, qid, 'negative_score') or 0)
+                    for qid in quiz_result["responses"].keys()
+                ])
 
-            # Save result back to database
-            await set_quiz_response(pg_cursor, pg_conn, quiz_result)
+                # Save result back to database
+                await set_quiz_response(pg_cursor, pg_conn, quiz_result)
 
     except Exception as e:
         if isinstance(e, (NoQuestionsError, NoResponsesError, InvalidQuestionError, 

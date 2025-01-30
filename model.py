@@ -137,7 +137,7 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
 
     # Define response schema for guidelines
     guidelines_schema = [
-        ResponseSchema(name="guidelines", description="The evaluation guidelines and criteria")
+        ResponseSchema(name="guidelines", description="The evaluation guidelines")
     ]
     guidelines_parser = StructuredOutputParser.from_response_schemas(guidelines_schema)
     format_instructions = guidelines_parser.get_format_instructions()
