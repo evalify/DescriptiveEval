@@ -217,7 +217,7 @@ async def validate_quiz_setup(quiz_id: str, questions: List[dict], responses: Li
         raise TotalScoreError(quiz_id, total_scores, "Inconsistent total scores")
 
 async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db,
-                                       redis_client: Redis, save_to_file=True, llm=None):
+                                       redis_client: Redis, save_to_file=True, llm=None, override_evaluated=True):
     """
     Evaluate all responses for a quiz with rubric caching and parallel processing.
     
@@ -229,6 +229,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         redis_client (Redis): Redis client for caching
         save_to_file (bool): Whether to save results to files
         llm: Optional LLM instance to use for evaluation
+        override_evaluated (bool): Whether to re-evaluate already evaluated responses (isEvaluated='EVALUATED')
         
     Raises:
         NoQuestionsError: If no questions are found for the quiz
@@ -278,6 +279,11 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             logger.info(f"Using {len(valid_keys)} API keys in rotation for evaluation")
 
         for quiz_result in tqdm(quiz_responses, desc="Evaluating quiz responses"):
+            if quiz_result.get("isEvaluated") == 'EVALUATED':
+                if not override_evaluated:
+                    logger.info(f"Skipping evaluation for already evaluated quiz response {quiz_result['id']}")
+                    continue
+                logger.info(f"Re-evaluating quiz response {quiz_result['id']}")
             quiz_result["totalScore"] = 0
             for question in questions:
                 qid = str(question["_id"])

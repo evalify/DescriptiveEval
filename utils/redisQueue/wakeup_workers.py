@@ -7,6 +7,8 @@ from utils.database import get_redis_client
 from rq import Worker
 import socket
 from utils.logger import logger
+import json
+from datetime import datetime
 
 def spawn_workers(num_workers: int = None):
     """
@@ -62,45 +64,81 @@ def check_workers(processes):
         rq_workers = Worker.all(connection=redis_conn)
         logger.debug(f"Found {len(rq_workers)} registered RQ workers")
         
-        hostname = socket.gethostname()
-        worker_jobs = {}
+        # Clean up registry of terminated workers
         for w in rq_workers:
             try:
                 pid = int(w.name.split('.')[1])
-                worker_jobs[pid] = w.get_current_job()
+                if not psutil.pid_exists(pid):
+                    w.register_death()
+                    logger.info(f"Cleaned up registry for terminated worker {pid}")
+            except (IndexError, ValueError):
+                continue
+        
+        # Refresh worker list after cleanup
+        rq_workers = Worker.all(connection=redis_conn)
+        worker_jobs = {}
+        
+        for w in rq_workers:
+            try:
+                pid = int(w.name.split('.')[1])
+                current_job = w.get_current_job()
+                # Ensure job data is JSON serializable
+                if current_job:
+                    worker_jobs[pid] = {
+                        'args': [str(arg) for arg in (current_job.args or [])],
+                        'id': str(current_job.id),
+                        'status': current_job.get_status()
+                    }
             except (IndexError, ValueError) as e:
                 logger.warning(f"Could not parse worker name: {w.name}", exc_info=True)
+                continue
+            except Exception as e:
+                logger.error(f"Error getting job info for worker {w.name}: {str(e)}", exc_info=True)
                 continue
         
         status_info = []
         for i, process in enumerate(processes):
             try:
-                psutil_process = psutil.Process(process.pid)
-                is_running = psutil_process.is_running()
+                is_running = psutil.pid_exists(process.pid)
+                if is_running:
+                    try:
+                        psutil_process = psutil.Process(process.pid)
+                        if not psutil_process.is_running() or psutil_process.status() == 'zombie':
+                            is_running = False
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        is_running = False
+                
                 current_job = worker_jobs.get(process.pid)
                 
                 if is_running:
-                    cpu_percent = psutil_process.cpu_percent()
-                    memory_percent = psutil_process.memory_percent()
-                    logger.debug(f"Worker {process.pid} stats - CPU: {cpu_percent}%, Memory: {memory_percent}%")
-                    
-                    status = {
-                        'worker_id': i + 1,
-                        'status': 'running',
-                        'pid': process.pid,
-                        'cpu_percent': cpu_percent,
-                        'memory_percent': memory_percent,
-                        'current_job': {
-                            'quiz_id': current_job.args[0] if current_job and current_job.args else None,
-                            'job_id': current_job.id if current_job else None,
-                            'status': current_job.get_status() if current_job else 'idle'
-                        } if current_job else None
-                    }
-                    
-                    if current_job:
-                        logger.info(f"Worker {process.pid} is processing job {current_job.id}")
-                    
-                else:
+                    try:
+                        psutil_process = psutil.Process(process.pid)
+                        cpu_percent = psutil_process.cpu_percent()
+                        memory_percent = psutil_process.memory_percent()
+                        
+                        status = {
+                            'worker_id': i + 1,
+                            'status': 'running',
+                            'pid': process.pid,
+                            'cpu_percent': float(cpu_percent),
+                            'memory_percent': float(memory_percent),
+                            'current_job': {
+                                'quiz_id': current_job['args'][0] if current_job and current_job['args'] else None,
+                                'job_id': current_job['id'] if current_job else None,
+                                'status': current_job['status'] if current_job else 'idle'
+                            } if current_job else None
+                        }
+                        
+                        if current_job:
+                            logger.info(f"Worker {process.pid} is processing job {current_job['id']}")
+                            
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        is_running = False
+                    except Exception as e:
+                        logger.error(f"Error getting process stats for {process.pid}: {str(e)}", exc_info=True)
+                        is_running = False
+                
+                if not is_running:
                     logger.warning(f"Worker {process.pid} is not running")
                     status = {
                         'worker_id': i + 1,
@@ -109,7 +147,7 @@ def check_workers(processes):
                         'return_code': process.returncode if process.returncode is not None else 0
                     }
                     
-            except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+            except Exception as e:
                 logger.error(f"Error checking worker {process.pid}: {str(e)}", exc_info=True)
                 status = {
                     'worker_id': i + 1,
@@ -120,13 +158,30 @@ def check_workers(processes):
             
             status_info.append(status)
         
+        # Validate JSON serialization before returning
+        try:
+            json.dumps(status_info)
+        except (TypeError, ValueError) as e:
+            logger.error(f"Status info is not JSON serializable: {str(e)}", exc_info=True)
+            # Return a safe version with only essential info
+            status_info = [{
+                'worker_id': s['worker_id'],
+                'status': s['status'],
+                'pid': s['pid']
+            } for s in status_info]
+        
         active_workers = sum(1 for s in status_info if s['status'] == 'running')
         logger.info(f"Status check complete. {active_workers}/{len(processes)} workers active")
         return status_info
         
     except Exception as e:
         logger.critical("Critical error during worker status check", exc_info=True)
-        raise
+        # Return minimal safe status on error
+        return [{
+            'worker_id': i + 1,
+            'status': 'unknown',
+            'pid': p.pid
+        } for i, p in enumerate(processes)]
 
 if __name__ == '__main__':
     spawn_workers()

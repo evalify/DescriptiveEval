@@ -2,6 +2,7 @@ from typing import Optional
 from utils.redisQueue.wakeup_workers import spawn_workers, check_workers
 from utils.logger import logger
 import psutil
+import time
 
 from fastapi import FastAPI, Depends, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +14,7 @@ from utils.database import get_postgres_cursor, get_mongo_client, get_redis_clie
 from evaluation import bulk_evaluate_quiz_responses
 from model import LLMProvider, get_llm, score, generate_guidelines, enhance_question_and_answer
 
-from rq import Queue
+from rq import Queue, Worker
 from utils.redisQueue import job as rq_job
 
 import time
@@ -221,10 +222,11 @@ async def evaluate_bulk_queue(
 
 @app.get("/workers/status")
 async def get_workers_status():
+    """Get the status of all worker processes"""
     trace_id = uuid.uuid4()
     logger.debug(f"[{trace_id}] Checking worker status")
     try:
-        status = check_workers(worker_processes)
+        status = check_workers(worker_processes)  # Direct call, not async
         active_workers = sum(1 for w in status if w['status'] == 'running')
         logger.info(f"[{trace_id}] Worker status check complete. {active_workers} active workers")
         return status
@@ -247,8 +249,25 @@ async def kill_worker(pid: int):
                 detail=f"No worker found with PID {pid}"
             )
             
-        # Get the process
+        # Get the process and Redis connection
         process = psutil.Process(pid)
+        redis_conn = get_redis_client()
+        
+        # Find the worker in Redis
+        workers = Worker.all(connection=redis_conn)
+        worker = next((w for w in workers if str(pid) in w.name), None)
+        
+        if worker:
+            # Cancel any current job
+            current_job = worker.get_current_job()
+            if current_job:
+                logger.warning(f"[{trace_id}] Cancelling job {current_job.id} on worker {pid}")
+                current_job.cancel()
+                current_job.save()
+            
+            # Deregister the worker
+            worker.register_death()
+            logger.info(f"[{trace_id}] Deregistered worker {pid} from Redis")
         
         # Verify it's actually our worker python process
         if not process.name().lower().startswith('python'):
@@ -256,15 +275,46 @@ async def kill_worker(pid: int):
                 status_code=400,
                 detail=f"Process {pid} is not a Python worker process"
             )
-            
-        # Kill the process
-        process.kill()
-        logger.info(f"[{trace_id}] Successfully killed worker {pid}")
         
-        # Return updated worker status
+        # Kill the process and its children
+        children = process.children(recursive=True)
+        for child in children:
+            try:
+                child.kill()
+            except psutil.NoSuchProcess:
+                pass
+        
+        # Try graceful termination first
+        process.terminate()
+        
+        try:
+            process.wait(timeout=3)  # Reduced timeout since we're being more aggressive
+        except psutil.TimeoutExpired:
+            logger.warning(f"[{trace_id}] Worker {pid} did not terminate gracefully, forcing kill")
+            process.kill()
+        
+        # Ensure the process is dead
+        max_wait = 5
+        start_time = time.time()
+        while time.time() - start_time < max_wait:
+            if not psutil.pid_exists(pid):
+                break
+            time.sleep(0.1)
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"Failed to terminate worker {pid} after {max_wait} seconds"
+            )
+        
+        logger.info(f"[{trace_id}] Successfully terminated worker {pid}")
+        
+        # Get updated worker status
+        time.sleep(0.5)  # Short delay to let system update
+        status_info = check_workers(worker_processes)  # Direct call, not async
+        
         return {
-            "message": f"Worker {pid} terminated",
-            "workers": await get_workers_status()
+            "message": f"Worker {pid} terminated successfully",
+            "workers": status_info
         }
         
     except psutil.NoSuchProcess:
@@ -279,6 +329,8 @@ async def kill_worker(pid: int):
             status_code=403,
             detail=f"Access denied when trying to kill worker {pid}"
         )
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"[{trace_id}] Error killing worker {pid}", exc_info=True)
         raise HTTPException(
