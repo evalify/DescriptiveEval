@@ -215,7 +215,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             for question in questions:
                 qid = str(question["_id"])
 
-                if question[]
+
 
                 # Convert old schema to new schema if the response is a list
                 if isinstance(quiz_result["responses"].get(qid), list):
@@ -227,10 +227,12 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                     if "questionMarks" in quiz_result:
                         del quiz_result["questionMarks"]
                 try:
+                    if question.get("marks") is not None:
+                        question["mark"] = question["marks"]    # Change marks to mark
                     quiz_result["totalScore"] += question["mark"]  # TODO: Is this correct?
                     question_total_score = question["mark"]
                 except KeyError:
-                    print(f"Question {qid!r} does not have a 'mark' attribute. Skipping")
+                    print(f"Question {qid!r} does not have a 'mark'/'marks' attribute. Skipping")
                     continue
 
                 if qid not in quiz_result["responses"]:
