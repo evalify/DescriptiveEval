@@ -1,7 +1,9 @@
 from typing import Optional
 from utils.redisQueue.wakeup_workers import spawn_workers, check_workers
+from utils.logger import logger
+import psutil
 
-from fastapi import FastAPI, Depends
+from fastapi import FastAPI, Depends, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -14,9 +16,17 @@ from model import LLMProvider, get_llm, score, generate_guidelines, enhance_ques
 from rq import Queue
 from utils.redisQueue import job as rq_job
 
+import time
+import uuid
+import os
+import psutil
+
 app = FastAPI()
+logger.info("Initializing FastAPI application")
+
 # Initialize workers when app starts
 worker_processes = spawn_workers()
+logger.info(f"Initialized {len(worker_processes)} worker processes")
 
 # Store current provider in app state
 app.state.current_provider = LLMProvider.OLLAMA
@@ -35,6 +45,18 @@ app.add_middleware(
 
 tasks_queue = Queue("task_queue",connection=get_redis_client())
 
+@app.middleware("http")
+async def log_requests(request: Request, call_next):
+    start_time = time.time()
+    response = await call_next(request)
+    duration = time.time() - start_time
+    logger.info(
+        f"Path: {request.url.path} | "
+        f"Method: {request.method} | "
+        f"Status: {response.status_code} | "
+        f"Duration: {duration:.3f}s"
+    )
+    return response
 
 class QueryRequest(BaseModel):
     question: str = None
@@ -81,13 +103,15 @@ async def change_provider(request: ProviderRequest):
         provider = LLMProvider(request.provider.lower())
         provider_model_name = request.provider_model_name
         provider_api_key = request.provider_api_key
-        # Update the app state
+        
+        logger.info(f"Changing provider to {provider.value} with model {provider_model_name}")
         app.state.current_provider = provider
         app.state.current_model_name = provider_model_name
         app.state.current_api_key = provider_api_key
-
+        
         return {"message": f"Successfully switched to {provider.value} provider with model {provider_model_name}"}
     except ValueError as e:
+        logger.error(f"Invalid provider requested: {request.provider}", exc_info=True)
         return {"error": str(e)}
 
 
@@ -96,15 +120,23 @@ async def get_response(
         request: QueryRequest,
         llm=Depends(get_llm_dependency)
 ):
-    result = await score(
-        llm=llm,
-        student_ans=request.student_ans,
-        expected_ans=request.expected_ans,
-        total_score=request.total_score,
-        question=request.question,
-        guidelines=request.guidelines  # Pass guidelines if provided
-    )
-    return result
+    trace_id = uuid.uuid4()
+    logger.info(f"[{trace_id}] Scoring request received for question: {request.question[:100]}...")
+    
+    try:
+        result = await score(
+            llm=llm,
+            student_ans=request.student_ans,
+            expected_ans=request.expected_ans,
+            total_score=request.total_score,
+            question=request.question,
+            guidelines=request.guidelines  # Pass guidelines if provided
+        )
+        logger.info(f"[{trace_id}] Scoring complete. Score: {result.get('score')}")
+        return result
+    except Exception as e:
+        logger.error(f"[{trace_id}] Error processing scoring request", exc_info=True)
+        raise
 
 
 @app.post("/generate-guidelines")
@@ -112,13 +144,21 @@ async def generate_guidelines_api(
         request: GuidelinesRequest,
         llm=Depends(get_llm_dependency)
 ):
-    guidelines_result = await generate_guidelines(
-        llm,
-        question=request.question or "",
-        expected_ans=request.expected_ans or "",
-        total_score=request.total_score or 10
-    )
-    return guidelines_result
+    trace_id = uuid.uuid4()
+    logger.info(f"[{trace_id}] Guidelines generation request received for question: {request.question[:100]}...")
+    
+    try:
+        guidelines_result = await generate_guidelines(
+            llm,
+            question=request.question or "",
+            expected_ans=request.expected_ans or "",
+            total_score=request.total_score or 10
+        )
+        logger.info(f"[{trace_id}] Guidelines generated successfully")
+        return guidelines_result
+    except Exception as e:
+        logger.error(f"[{trace_id}] Error generating guidelines", exc_info=True)
+        raise
 
 
 @app.post("/enhance-qa")
@@ -161,13 +201,90 @@ async def evaluate_bulk(
 async def evaluate_bulk_queue(
         request: EvalRequest,
 ):
-    tasks_queue.enqueue(rq_job.evaluation_job, request.quiz_id, app.state.current_provider, app.state.current_model_name, app.state.current_api_key)
-    return {"message": "Evaluation queued"}
+    trace_id = uuid.uuid4()
+    logger.info(f"[{trace_id}] Queueing evaluation for quiz_id: {request.quiz_id}")
+    
+    try:
+        job = tasks_queue.enqueue(
+            rq_job.evaluation_job,
+            request.quiz_id,
+            app.state.current_provider,
+            app.state.current_model_name,
+            app.state.current_api_key,
+            job_timeout=os.getenv('WORKER_TTL', 3600)
+        )
+        logger.info(f"[{trace_id}] Successfully queued evaluation job. Job ID: {job.id}")
+        return {"message": "Evaluation queued", "job_id": job.id}
+    except Exception as e:
+        logger.error(f"[{trace_id}] Failed to queue evaluation", exc_info=True)
+        raise
 
 @app.get("/workers/status")
 async def get_workers_status():
-    """Get the status of all worker processes"""
-    return check_workers(worker_processes)
+    trace_id = uuid.uuid4()
+    logger.debug(f"[{trace_id}] Checking worker status")
+    try:
+        status = check_workers(worker_processes)
+        active_workers = sum(1 for w in status if w['status'] == 'running')
+        logger.info(f"[{trace_id}] Worker status check complete. {active_workers} active workers")
+        return status
+    except Exception as e:
+        logger.error(f"[{trace_id}] Error checking worker status", exc_info=True)
+        raise
+
+@app.post("/workers/kill/{pid}")
+async def kill_worker(pid: int):
+    """Force quit a specific worker process by PID."""
+    trace_id = uuid.uuid4()
+    logger.info(f"[{trace_id}] Attempting to kill worker with PID: {pid}")
+    
+    try:
+        # Verify the PID belongs to one of our workers
+        worker_pids = [p.pid for p in worker_processes]
+        if pid not in worker_pids:
+            raise HTTPException(
+                status_code=404,
+                detail=f"No worker found with PID {pid}"
+            )
+            
+        # Get the process
+        process = psutil.Process(pid)
+        
+        # Verify it's actually our worker python process
+        if not process.name().lower().startswith('python'):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Process {pid} is not a Python worker process"
+            )
+            
+        # Kill the process
+        process.kill()
+        logger.info(f"[{trace_id}] Successfully killed worker {pid}")
+        
+        # Return updated worker status
+        return {
+            "message": f"Worker {pid} terminated",
+            "workers": await get_workers_status()
+        }
+        
+    except psutil.NoSuchProcess:
+        logger.error(f"[{trace_id}] Worker {pid} not found")
+        raise HTTPException(
+            status_code=404,
+            detail=f"Worker process {pid} not found"
+        )
+    except psutil.AccessDenied:
+        logger.error(f"[{trace_id}] Access denied when trying to kill worker {pid}")
+        raise HTTPException(
+            status_code=403,
+            detail=f"Access denied when trying to kill worker {pid}"
+        )
+    except Exception as e:
+        logger.error(f"[{trace_id}] Error killing worker {pid}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to kill worker {pid}: {str(e)}"
+        )
 
 if __name__ == "__main__":
     import uvicorn
