@@ -37,7 +37,8 @@ class QueryRequest(BaseModel):
 
 class ProviderRequest(BaseModel):
     provider: str
-    model_name: str = None
+    provider_model_name: str = None
+    provider_api_key: str = None
 
 
 class GuidelinesRequest(BaseModel):
@@ -68,10 +69,15 @@ def get_llm_dependency():
 @app.post("/set-provider")
 async def change_provider(request: ProviderRequest):
     try:
-        provider = LLMProvider(request.provider.lower())  # TODO: Add model_name and api_key support
+        provider = LLMProvider(request.provider.lower())
+        provider_model_name = request.provider_model_name
+        provider_api_key = request.provider_api_key
         # Update the app state
         app.state.current_provider = provider
-        return {"message": f"Successfully switched to {provider.value}"}
+        app.state.current_model_name = provider_model_name
+        app.state.current_api_key = provider_api_key
+
+        return {"message": f"Successfully switched to {provider.value} provider with model {provider_model_name}"}
     except ValueError as e:
         return {"error": str(e)}
 

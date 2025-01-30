@@ -99,6 +99,7 @@ async def score(llm, student_ans:str, expected_ans:str, total_score:float, quest
 
     try:
         response = await llm.ainvoke(_input)
+        #print(response)
         if hasattr(response, 'content'):
             response = response.content
         elif not isinstance(response, str):
@@ -229,6 +230,7 @@ async def score_fill_in_blank(llm, student_ans: str, expected_ans:str, total_sco
     :param llm: The LLM instance to use for scoring
     :param student_ans: The student's answer to evaluate
     :param expected_ans: The expected answer for comparison
+    :param total_score: The total score to evaluate for
     :param question: The question
     """
     if not expected_ans or expected_ans.strip() == "":
@@ -270,7 +272,7 @@ async def score_fill_in_blank(llm, student_ans: str, expected_ans:str, total_sco
 
     try:
         response = await llm.ainvoke(_input)
-        # print(response)
+        #print(response)
         if hasattr(response, 'content'):
             response = response.content
         elif not isinstance(response, str):
