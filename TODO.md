@@ -30,7 +30,6 @@
 - [x] Add QuizReport aka Statistics - follow schema refer [route](https://github.com/Aksaykanthan/evalify/blob/main/src/app/api/staff/result/route.ts)
 - [ ] Add model selection support
 - [ ] Add API for retrieving available models (Hard-Coded but validated from list of available models in ollama)
-- [ ] Add support thinking model support for Evaluator-LLM
 - [ ] Add Queue Management for Evaluation
 
 ## Medium Priority

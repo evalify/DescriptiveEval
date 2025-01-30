@@ -3,8 +3,10 @@ This module contains functions to evaluate quiz responses in bulk using LLMs and
 Functions:
 1. get_guidelines - Get the guidelines for a question using an LLM (cached)
 2. get_quiz_responses - Get all responses for a quiz based on the quiz ID from the Cockroach database (cached)
-3. get_all_questions - Get all questions for a quiz from MongoDB (cached)
-4. bulk_evaluate_quiz_responses - Evaluate all responses for a quiz with rubric caching and parallel processing
+3. set_quiz_response - Update the database with the evaluated results
+4. get_all_questions - Get all questions for a quiz from MongoDB (cached)
+5. get_evaluation_settings - Get the evaluation settings for a quiz from the Cockroach database
+6. bulk_evaluate_quiz_responses - Evaluate all responses for a quiz with rubric caching and parallel processing
 
 """
 
@@ -17,7 +19,8 @@ from dotenv import load_dotenv
 from redis import Redis
 from tqdm import tqdm
 
-from model import score, LLMProvider, get_llm, generate_guidelines
+# Custom imports
+from model import score, LLMProvider, get_llm, generate_guidelines, score_fill_in_blank
 from utils.evaluation.code_eval import evaluate_coding_question
 from utils.misc import DateTimeEncoder, remove_html_tags
 from utils.quiz.quiz_report import generate_quiz_report, save_quiz_report
@@ -112,6 +115,13 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
 
 
 async def set_quiz_response(cursor, conn, response: dict):
+    """
+    Update the database with the evaluated results, using async thread.
+
+    :param cursor: PostgresSQL cursor for database operations
+    :param conn: PostgresSQL connection for database operations
+    :param response: The evaluated response to update in the database
+    """
     await asyncio.to_thread(
         cursor.execute,
         """UPDATE "QuizResult" 
@@ -188,7 +198,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         raise ValueError(f"No responses found for quiz {quiz_id}")
 
     evaluation_settings = get_evaluation_settings(pg_cursor,
-                                                  quiz_id) or {}  # TODO: Move this to a class instead of a function
+                                                  quiz_id) or {}  # TODO: Move this to a class instead of a function and warn about missing settings
     print(f"Settings for quiz {quiz_id}: {evaluation_settings!r}")
     negative_marking = evaluation_settings.get("negativeMark", False)
     mcq_partial_marking = evaluation_settings.get("mcqPartialMark", False)
@@ -204,6 +214,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             quiz_result["totalScore"] = 0
             for question in questions:
                 qid = str(question["_id"])
+
+                if question[]
 
                 # Convert old schema to new schema if the response is a list
                 if isinstance(quiz_result["responses"].get(qid), list):
@@ -314,7 +326,27 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         if await direct_match(response, correct_answer, strip=True, case_sensitive=False):
                             fitb_score = question_total_score
                         else:
-                            fitb_score = 0  # TODO: High-Priority - Implement LLM Scoring for Fill in the Blanks
+                            current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, None))
+                            clean_question = remove_html_tags(question['question']).strip()
+                            for i in range(10):
+                                fitb_score = await score_fill_in_blank(
+                                    llm=current_llm,
+                                    question=clean_question,
+                                    student_ans=response,
+                                    expected_ans=correct_answer,
+                                    total_score=question_total_score,
+                                )
+
+                                if fitb_score is None or fitb_score.startswith("Error:"):
+                                    print("Encountered Error. Retrying with a different API key with i=", i)
+                                    current_llm = get_llm(LLMProvider.GROQ,
+                                                          next(groq_api_keys),
+                                                          'llama-3.3-70b-versatile' if i > 5 else None)
+                                else:
+                                    break
+                            else:
+                                raise Exception("Failed to evaluate the response. All API keys exhausted.")
+
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'score', fitb_score)
 
                     case _:
@@ -332,6 +364,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         # Get quiz report
         quiz_report = await generate_quiz_report(quiz_id, quiz_responses, questions)
         await save_quiz_report(quiz_id, quiz_report, pg_cursor, pg_conn, save_to_file)
+        # Update the database with the evaluated status
         pg_cursor.execute(
             """UPDATE "Quiz" SET "isEvaluated" = 'EVALUATED' WHERE "id" = %s""",
             (quiz_id,))

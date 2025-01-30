@@ -26,7 +26,7 @@ app.add_middleware(
 
 
 class QueryRequest(BaseModel):
-    question: Optional[str] = None
+    question: str = None
     student_ans: str
     expected_ans: str
     total_score: int
@@ -38,9 +38,9 @@ class ProviderRequest(BaseModel):
 
 
 class GuidelinesRequest(BaseModel):
-    question: Optional[str] = None
-    expected_ans: Optional[str] = None
-    total_score: Optional[int] = 10
+    question: str = None
+    expected_ans: str = None
+    total_score: int = 10
 
 
 class QAEnhancementRequest(BaseModel):
@@ -48,7 +48,7 @@ class QAEnhancementRequest(BaseModel):
     expected_ans: str
 
 
-class BulkEvalRequest(BaseModel):
+class EvalRequest(BaseModel):
     quiz_id: str
 
 
@@ -118,7 +118,7 @@ async def enhance_qa(
 
 @app.post("/evaluate")  # TODO: Implement Queueing
 async def evaluate_bulk(
-        request: BulkEvalRequest,
+        request: EvalRequest,
 ):
     postgres_cursor, postgres_conn = get_postgres_cursor()
     mongo_db = get_mongo_client()

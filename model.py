@@ -9,7 +9,7 @@ from langchain_ollama import OllamaLLM
 
 load_dotenv()
 
-from utils.evaluation.templates import evaluation_template, guidelines_template, qa_enhancement_template
+from utils.evaluation.templates import evaluation_template, guidelines_template, qa_enhancement_template, fill_in_the_blank_template
 
 
 class LLMProvider(Enum):
@@ -38,7 +38,7 @@ def get_llm(provider: LLMProvider = LLMProvider.GROQ, api_key=None, model_name=N
         raise ValueError(f"Unsupported LLM provider: {provider}")
 
 
-async def score(llm, student_ans, expected_ans, total_score, question=None, guidelines=None):
+async def score(llm, student_ans:str, expected_ans:str, total_score:float, question:str=None, guidelines:str=None):
     """
     Evaluate a student's answer based on the expected answer and guidelines.
 
@@ -221,3 +221,85 @@ async def enhance_question_and_answer(llm, question: str, expected_ans: str) -> 
             "enhanced_question": f"Error: Error processing response: {str(e)}",
             "enhanced_expected_ans": f"Error: Error processing response: {str(e)}"
         }
+
+async def score_fill_in_blank(llm, student_ans: str, expected_ans:str, total_score:float, question:str) -> dict:
+    """
+    Evaluate fill in the blank questions based on the expected answer and guidelines.
+
+    :param llm: The LLM instance to use for scoring
+    :param student_ans: The student's answer to evaluate
+    :param expected_ans: The expected answer for comparison
+    :param question: The question
+    """
+    if not expected_ans or expected_ans.strip() == "":
+        return {
+            "score": 0.0,
+            "reason": "Error: Expected answer is empty or missing",
+        }
+
+    if not student_ans or student_ans.strip() == "":
+        return {
+            "score": 0.0,
+            "reason": "Error: Student answer is empty or missing",
+        }
+
+    # Update response schemas to include 'rubric' and 'breakdown'
+    response_schemas = [
+        ResponseSchema(name="reason", description="A short and concise reason for the assigned score"),
+        ResponseSchema(name="score", description="The assigned score as a floating point number"),
+    ]
+
+    output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
+    format_instructions = output_parser.get_format_instructions()
+    question_section = f"\nQuestion:\n{question}\n" if question else "\n"
+
+    prompt_template = PromptTemplate(
+        input_variables=['student_ans', 'expected_ans', 'total_score'],
+        partial_variables={
+            "format_instructions": format_instructions,
+            "question_section": question_section,
+        },
+        template=fill_in_the_blank_template
+    )
+
+    _input = prompt_template.format(
+        student_ans=student_ans,
+        expected_ans=expected_ans,
+        total_score=total_score
+    )
+
+    try:
+        response = await llm.ainvoke(_input)
+        print(response)
+        if hasattr(response, 'content'):
+            response = response.content
+        elif not isinstance(response, str):
+            response = str(response)
+
+        parsed_response = output_parser.parse(response)
+        return {
+            "score": float(parsed_response.get("score", 0.0)), 
+            "reason": str(parsed_response.get("reason", "No reason provided"))
+        }
+    except Exception as e:
+        print(e)
+        return {
+            "score": 0.0,
+            "reason": f"Error: Error processing response: {str(e)}"
+        }
+
+
+if __name__ == "__main__":
+    import asyncio
+    import time
+    
+    my_llm = get_llm(provider=LLMProvider.OLLAMA, model_name="deepseek-r1:70b")
+    # Test fill in the blank scoring
+    my_question = "The Capital of France is ________."
+    my_expected_ans = "Paris"
+    my_student_ans = "Pariess"
+    my_total_score = 1
+    start = time.time()
+    result = asyncio.run(score_fill_in_blank(my_llm, my_student_ans, my_expected_ans, my_total_score, my_question))
+    print(f"Fill in the blank scoring took: {time.time() - start} seconds")
+    print(result)
