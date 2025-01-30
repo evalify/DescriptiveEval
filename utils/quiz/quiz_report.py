@@ -35,6 +35,8 @@ from typing import Any, Dict, List
 import json
 import asyncio
 import uuid
+from utils.misc import save_quiz_data
+from utils.logger import logger
 
 async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]], questions: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
@@ -99,42 +101,44 @@ async def save_quiz_report(quiz_id: str, report: Dict[str, Any], cursor, conn, s
     :param conn: Database connection
     :param save_to_file: Whether to save to a file (default: True)
     """
-    # Save to database
-    await asyncio.to_thread(
-        cursor.execute,
-        """INSERT INTO "QuizReport" (
-            "id", "quizId", "maxScore", "avgScore", "minScore", 
-            "totalScore", "totalStudents", "questionStats", "markDistribution", "evaluatedAt"
-        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-        ON CONFLICT ("quizId") 
-        DO UPDATE SET 
-            "maxScore" = EXCLUDED."maxScore",
-            "avgScore" = EXCLUDED."avgScore",
-            "minScore" = EXCLUDED."minScore",
-            "totalScore" = EXCLUDED."totalScore",
-            "totalStudents" = EXCLUDED."totalStudents",
-            "questionStats" = EXCLUDED."questionStats",
-            "markDistribution" = EXCLUDED."markDistribution",
-            "evaluatedAt" = NOW()
-        """,
-        (
-            uuid.uuid4().hex,
-            quiz_id,
-            report['maxScore'],
-            report['avgScore'],
-            report['minScore'],
-            report['totalScore'],
-            report['totalStudents'],
-            json.dumps(report['questionStats']),
-            json.dumps(report['markDistribution']),
+    try:
+        # Save to database
+        await asyncio.to_thread(
+            cursor.execute,
+            """INSERT INTO "QuizReport" (
+                "id", "quizId", "maxScore", "avgScore", "minScore", 
+                "totalScore", "totalStudents", "questionStats", "markDistribution", "evaluatedAt"
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            ON CONFLICT ("quizId") 
+            DO UPDATE SET 
+                "maxScore" = EXCLUDED."maxScore",
+                "avgScore" = EXCLUDED."avgScore",
+                "minScore" = EXCLUDED."minScore",
+                "totalScore" = EXCLUDED."totalScore",
+                "totalStudents" = EXCLUDED."totalStudents",
+                "questionStats" = EXCLUDED."questionStats",
+                "markDistribution" = EXCLUDED."markDistribution",
+                "evaluatedAt" = NOW()
+            """,
+            (
+                uuid.uuid4().hex,
+                quiz_id,
+                report['maxScore'],
+                report['avgScore'],
+                report['minScore'],
+                report['totalScore'],
+                report['totalStudents'],
+                json.dumps(report['questionStats']),
+                json.dumps(report['markDistribution']),
+            )
         )
-    )
-    await asyncio.to_thread(conn.commit)
+        await asyncio.to_thread(conn.commit)
+        logger.info(f"Saved quiz report to database for quiz {quiz_id}")
 
-    # Save to file if requested
-    if save_to_file:
-        try:
-            with open(f'data/json/{quiz_id}_quiz_report.json', 'w') as f:
-                json.dump(report, f, indent=4)
-        except IOError as e:
-            print(f"Error writing quiz report to file: {e}")
+        # Save to file if requested
+        if save_to_file:
+            save_quiz_data(report, quiz_id, 'report')
+            
+    except Exception as e:
+        logger.error(f"Failed to save quiz report in db for quiz {quiz_id}: {str(e)}", exc_info=True)
+        raise

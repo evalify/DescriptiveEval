@@ -3,6 +3,9 @@
 import json
 import re
 from datetime import datetime
+from pathlib import Path
+from typing import Any, Dict, List
+from utils.logger import logger
 
 
 class DateTimeEncoder(json.JSONEncoder):
@@ -16,6 +19,34 @@ class DateTimeEncoder(json.JSONEncoder):
 def remove_html_tags(data):
     p = re.compile(r'<.*?>')
     return p.sub('', data)
+
+
+def save_quiz_data(data: Any, quiz_id: str, file_type: str) -> None:
+    """
+    Save quiz related data to a JSON file in a quiz-specific directory.
+    
+    Args:
+        data: The data to save (must be JSON serializable)
+        quiz_id: The ID of the quiz
+        file_type: Type of data ('questions', 'responses', 'responses_evaluated', 'report')
+    """
+    try:
+        # Create quiz directory if it doesn't exist
+        quiz_dir = Path('data/json') / quiz_id
+        quiz_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Determine filename based on type
+        filename = f"{file_type}.json"
+        file_path = quiz_dir / filename
+        
+        with open(file_path, 'w') as f:
+            json.dump(data, f, indent=4, cls=DateTimeEncoder)
+        logger.debug(f"Saved {file_type} data for quiz {quiz_id}")
+        
+    except IOError as e:
+        logger.error(f"Failed to save {file_type} data for quiz {quiz_id}: {str(e)}")
+    except Exception as e:
+        logger.error(f"Unexpected error saving {file_type} data for quiz {quiz_id}: {str(e)}", exc_info=True)
 
 
 if __name__ == '__main__':

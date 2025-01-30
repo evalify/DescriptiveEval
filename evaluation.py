@@ -15,7 +15,7 @@ from tqdm import tqdm
 # Custom imports
 from model import score, LLMProvider, get_llm, generate_guidelines, score_fill_in_blank
 from utils.evaluation.code_eval import evaluate_coding_question
-from utils.misc import DateTimeEncoder, remove_html_tags
+from utils.misc import DateTimeEncoder, remove_html_tags, save_quiz_data
 from utils.quiz.quiz_report import generate_quiz_report, save_quiz_report
 from utils.quiz.quiz_schema import QuizResponseSchema
 from utils.evaluation.static_eval import evaluate_mcq, evaluate_mcq_with_partial_marking, evaluate_true_false, direct_match
@@ -93,6 +93,7 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
     cached_responses = redis_client.get(quiz_id + '_responses_evalcache')
     if cached_responses:
         print("Responses Cache hit!")
+        save_quiz_data(json.loads(cached_responses), quiz_id, 'responses')
         return json.loads(cached_responses)
 
     query = """
@@ -108,12 +109,7 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
     redis_client.set(f'{quiz_id}_responses_evalcache', json.dumps(quiz_responses, cls=DateTimeEncoder), ex=CACHE_EX)
 
     if save_to_file:
-        try:
-            with open(f'data/json/{quiz_id}_quiz_responses.json', 'w') as f:
-                json.dump(quiz_responses, f, indent=4, cls=DateTimeEncoder)
-        except IOError as e:
-            print(f"Error writing to file: {e}")
-
+        save_quiz_data(quiz_responses, quiz_id, 'responses')
     return quiz_responses
 
 
@@ -147,6 +143,7 @@ def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=
     cached_questions = redis_client.get(quiz_id + '_questions_evalcache')
     if cached_questions:
         print("Questions Cache hit!")
+        save_quiz_data(json.loads(cached_questions), quiz_id, 'questions')
         return json.loads(cached_questions)
 
     collection = mongo_db['NEW_QUESTIONS']
@@ -156,14 +153,11 @@ def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=
     for question in questions:
         question['_id'] = str(question['_id'])
 
+    if save_to_file:
+        save_quiz_data(questions, quiz_id, 'questions')
+
     redis_client.set(f'{quiz_id}_questions_evalcache', json.dumps(questions, cls=DateTimeEncoder), ex=CACHE_EX)
 
-    if save_to_file:
-        try:
-            with open(f'data/json/{quiz_id}_quiz_questions.json', 'w') as f:
-                json.dump(questions, f, indent=4, cls=DateTimeEncoder)
-        except IOError as e:
-            print(f"Error writing to file: {e}")
     return questions
 
 
@@ -609,11 +603,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             pg_conn.commit()
             
             if save_to_file:
-                try:
-                    with open(f'data/json/{quiz_id}_quiz_responses_evaluated.json', 'w') as f:
-                        json.dump(quiz_responses, f, indent=4, cls=DateTimeEncoder)
-                except IOError as e:
-                    logger.error(f"Failed to save evaluation results to file: {str(e)}")
+                save_quiz_data(quiz_responses, quiz_id, 'responses_evaluated')
                     
         except Exception as e:
             logger.error(f"Error in evaluation cleanup for quiz {quiz_id}: {str(e)}", exc_info=True)
