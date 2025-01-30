@@ -176,7 +176,7 @@ def get_evaluation_settings(cursor, quiz_id: str) -> dict | None:
 
 
 async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db,
-                                       redis_client: Redis, save_to_file=True):  # TODO: Handle Errors
+                                       redis_client: Redis, save_to_file=True, llm=None):  # TODO: Handle Errors
     """
     Evaluate all responses for a quiz with rubric caching and parallel processing.
 
@@ -186,6 +186,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     :param mongo_db: MongoDB database from database.get_mongo_client() - for getting questions
     :param redis_client: Redis client from database.get_redis_client() - for caching
     :param save_to_file: Save the evaluated responses to a file (default: True)
+    :param llm: The LLM to use for evaluation (default: None -> uses Groq)
     """
     quiz_responses = get_quiz_responses(cursor=pg_cursor, redis_client=redis_client, quiz_id=quiz_id,
                                         save_to_file=save_to_file)
@@ -203,13 +204,14 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     negative_marking = evaluation_settings.get("negativeMark", False)
     mcq_partial_marking = evaluation_settings.get("mcqPartialMark", False)
 
-    keys = [os.getenv("GROQ_API_KEY"), os.getenv("GROQ_API_KEY2"), os.getenv("GROQ_API_KEY3"),
-            os.getenv("GROQ_API_KEY4"), os.getenv("GROQ_API_KEY5")]
-    groq_api_keys = itertools.cycle([key for key in keys if key is not None])
-    for i, key in enumerate(keys, start=1):
-        print(f"Key {i}: {key}")
+    if llm is None:
+        keys = [os.getenv("GROQ_API_KEY"), os.getenv("GROQ_API_KEY2"), os.getenv("GROQ_API_KEY3"),
+                os.getenv("GROQ_API_KEY4"), os.getenv("GROQ_API_KEY5")]
+        groq_api_keys = itertools.cycle([key for key in keys if key is not None])
+        for i, key in enumerate(keys, start=1):
+            print(f"Key {i}: {key}")
 
-    try:
+    try:    #TODO: Add type-wise toggle for selectively skipping
         for quiz_result in tqdm(quiz_responses, desc="Evaluating quiz responses"):
             quiz_result["totalScore"] = 0
             for question in questions:
@@ -251,9 +253,9 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'score', mcq_score)
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score',
-                                                         question.get("negativeMark", -1)
+                                                         question.get("negativeMark", -question_total_score/2)
                                                          if negative_marking and mcq_score <= 0
-                                                         else 0)  # TODO: Partial marking for MCQ
+                                                         else 0)
 
                     case "DESCRIPTIVE":
                         clean_question = remove_html_tags(question['question']).strip()
@@ -267,7 +269,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                 "breakdown": "Exact Match - LLM not used"
                             }
                         else:
-                            current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, None))
+                            current_llm = llm if llm else get_llm(LLMProvider.GROQ, next(groq_api_keys, None))
                             question_guidelines = question.get("guidelines",
                                                                await get_guidelines(redis_client=redis_client,
                                                                                     question_id=qid,
@@ -289,8 +291,9 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
                                 if any(score_res[key].startswith("Error:") for key in
                                        ["breakdown", "rubric"]) or score_res is None:
-                                    print("Encountered Error. Retrying with a different API key with i=", i)
-                                    current_llm = get_llm(LLMProvider.GROQ,
+                                    if not llm: print("Encountered Error. Retrying with a different API key with i=", i)
+                                    else: print("Encountered Error. Retrying")
+                                    current_llm =  llm if llm else get_llm(LLMProvider.GROQ,
                                                           next(groq_api_keys),
                                                           'llama-3.3-70b-versatile' if i > 5 else None)
                                 else:
@@ -318,17 +321,21 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         tf_score = await evaluate_true_false(response, correct_answer, question_total_score)
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'score', tf_score)
                         QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score',
-                                                         question.get("negativeMark", -1)
+                                                         question.get("negativeMark", -question_total_score/2)
                                                          if negative_marking and tf_score <= 0
                                                          else 0)
 
                     case "FILL_IN_BLANK":
                         response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
                         correct_answer = question["expectedAnswer"]
+                        fitb_score = {}
                         if await direct_match(response, correct_answer, strip=True, case_sensitive=False):
-                            fitb_score = question_total_score
+                            fitb_score = {
+                                'score': question_total_score,
+                                'reason': 'Exact Match'
+                            }
                         else:
-                            current_llm = get_llm(LLMProvider.GROQ, next(groq_api_keys, None))
+                            current_llm =  llm if llm else get_llm(LLMProvider.GROQ, next(groq_api_keys, None))
                             clean_question = remove_html_tags(question['question']).strip()
                             for i in range(10):
                                 fitb_score = await score_fill_in_blank(
@@ -339,17 +346,19 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                     total_score=question_total_score,
                                 )
 
-                                if fitb_score is None or fitb_score.startswith("Error:"):
-                                    print("Encountered Error. Retrying with a different API key with i=", i)
-                                    current_llm = get_llm(LLMProvider.GROQ,
+                                if fitb_score is None or fitb_score['reason'].startswith("Error:"):
+                                    if not llm : print("Encountered Error. Retrying with a different API key with i=", i)
+                                    else: print("Encountered Error. Retrying")
+                                    current_llm =  llm if llm else get_llm(LLMProvider.GROQ,
                                                           next(groq_api_keys),
                                                           'llama-3.3-70b-versatile' if i > 5 else None)
                                 else:
                                     break
                             else:
-                                raise Exception("Failed to evaluate the response. All API keys exhausted.")
-
-                        QuizResponseSchema.set_attribute(quiz_result, qid, 'score', fitb_score)
+                                raise Exception("Failed to evaluate the response.")
+                        
+                        QuizResponseSchema.set_attribute(quiz_result, qid, 'score', fitb_score["score"])
+                        QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', fitb_score['reason'])            
 
                     case _:
                         print(f"Question type {question.get('type')=!r} is not found")

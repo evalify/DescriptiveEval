@@ -12,7 +12,9 @@ from model import LLMProvider, get_llm, score, generate_guidelines, enhance_ques
 
 app = FastAPI()
 # Store current provider in app state
-app.state.current_provider = LLMProvider.GROQ
+app.state.current_provider = LLMProvider.OLLAMA
+app.state.current_model_name = "deepseek-r1:70b"
+app.state.current_api_key = None
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -35,6 +37,7 @@ class QueryRequest(BaseModel):
 
 class ProviderRequest(BaseModel):
     provider: str
+    model_name: str = None
 
 
 class GuidelinesRequest(BaseModel):
@@ -59,7 +62,7 @@ async def read_index():
 
 def get_llm_dependency():
     """Dependency to provide LLM instance based on current provider"""
-    return get_llm(provider=app.state.current_provider)
+    return get_llm(provider=app.state.current_provider, model_name=app.state.current_model_name, api_key=app.state.current_api_key)
 
 
 @app.post("/set-provider")
@@ -119,6 +122,7 @@ async def enhance_qa(
 @app.post("/evaluate")  # TODO: Implement Queueing
 async def evaluate_bulk(
         request: EvalRequest,
+        llm=Depends(get_llm_dependency)
 ):
     postgres_cursor, postgres_conn = get_postgres_cursor()
     mongo_db = get_mongo_client()
@@ -130,7 +134,8 @@ async def evaluate_bulk(
             postgres_conn,
             mongo_db,
             redis_client,
-            save_to_file=True
+            save_to_file=True,
+            llm = llm
         )
         return {"message": "Evaluation complete", "results": results}  # TODO: Give more detailed response
     finally:

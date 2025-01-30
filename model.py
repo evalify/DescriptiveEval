@@ -270,7 +270,7 @@ async def score_fill_in_blank(llm, student_ans: str, expected_ans:str, total_sco
 
     try:
         response = await llm.ainvoke(_input)
-        print(response)
+        # print(response)
         if hasattr(response, 'content'):
             response = response.content
         elif not isinstance(response, str):

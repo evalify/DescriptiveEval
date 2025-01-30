@@ -49,6 +49,8 @@ async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]],
     if len(total_score) > 1:
         print(f"Warning: Multiple total scores found for quiz results for {quiz_id=!r}")
     total_score = total_score.pop()
+    if total_score <= 0:
+        raise ValueError("Total score is ", total_score, " for quiz ", quiz_id)
     avg_score = sum(scores) / len(scores)
     max_score = max(scores)
     min_score = min(scores)
