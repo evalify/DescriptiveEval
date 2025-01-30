@@ -1,4 +1,5 @@
 from typing import Optional
+from utils.redisQueue.wakeup_workers import spawn_workers, check_workers
 
 from fastapi import FastAPI, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -14,6 +15,9 @@ from rq import Queue
 from utils.redisQueue import job as rq_job
 
 app = FastAPI()
+# Initialize workers when app starts
+worker_processes = spawn_workers()
+
 # Store current provider in app state
 app.state.current_provider = LLMProvider.OLLAMA
 app.state.current_model_name = "deepseek-r1:70b"
@@ -159,6 +163,11 @@ async def evaluate_bulk_queue(
 ):
     tasks_queue.enqueue(rq_job.evaluation_job, request.quiz_id, app.state.current_provider, app.state.current_model_name, app.state.current_api_key)
     return {"message": "Evaluation queued"}
+
+@app.get("/workers/status")
+async def get_workers_status():
+    """Get the status of all worker processes"""
+    return check_workers(worker_processes)
 
 if __name__ == "__main__":
     import uvicorn

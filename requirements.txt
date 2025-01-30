@@ -9,3 +9,4 @@ redis
 tqdm
 uvicorn
 rq
+psutil
