@@ -30,5 +30,5 @@ def get_redis_client() -> Redis:
         host=os.getenv('REDIS_HOST', '172.17.9.74'),
         port=int(os.getenv('REDIS_PORT', 32768)),
         db=int(os.getenv('REDIS_DB', 2)),
-        decode_responses=True
+        decode_responses=False
     )

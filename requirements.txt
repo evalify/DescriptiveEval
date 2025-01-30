@@ -2,9 +2,10 @@ langchain
 langchain-ollama
 langchain-groq
 python-dotenv
-psycopg2
+psycopg2-binary
 pymongo
 fastapi
 redis
 tqdm
 uvicorn
+rq

@@ -10,6 +10,9 @@ from utils.database import get_postgres_cursor, get_mongo_client, get_redis_clie
 from evaluation import bulk_evaluate_quiz_responses
 from model import LLMProvider, get_llm, score, generate_guidelines, enhance_question_and_answer
 
+from rq import Queue
+from utils.redisQueue import job as rq_job
+
 app = FastAPI()
 # Store current provider in app state
 app.state.current_provider = LLMProvider.OLLAMA
@@ -25,6 +28,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+tasks_queue = Queue("task_queue",connection=get_redis_client())
 
 
 class QueryRequest(BaseModel):
@@ -148,6 +153,12 @@ async def evaluate_bulk(
         postgres_cursor.close()
         postgres_conn.close()
 
+@app.post("/evaluate-queue")
+async def evaluate_bulk_queue(
+        request: EvalRequest,
+):
+    tasks_queue.enqueue(rq_job.evaluation_job, request.quiz_id, app.state.current_provider, app.state.current_model_name, app.state.current_api_key)
+    return {"message": "Evaluation queued"}
 
 if __name__ == "__main__":
     import uvicorn
