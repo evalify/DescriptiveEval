@@ -11,3 +11,4 @@ uvicorn
 rq
 psutil
 colorlog
+deprecated

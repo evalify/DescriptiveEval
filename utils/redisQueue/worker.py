@@ -31,7 +31,7 @@ try:
     redis_conn = get_redis_client()
     logger.info(f"Worker {worker_name} initializing with Redis connection")
     
-    worker = Worker(['task_queue'], connection=redis_conn, name=worker_name, default_worker_ttl=int(os.getenv('WORKER_TTL', 3600)))
+    worker = Worker(['task_queue'], connection=redis_conn, name=worker_name, worker_ttl=int(os.getenv('WORKER_TTL', 3600)))
     logger.info(f"Worker {worker_name} successfully created")
     
     # Set up worker to handle job cancellation
