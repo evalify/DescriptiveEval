@@ -132,7 +132,9 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
     """
     if not question or not expected_ans:
         return {
+            "status": 400,
             "guidelines": "Error: Provide a question and expected answer to generate evaluation rubric/guidelines",
+            "error": "Missing required parameters"
         }
 
     # Define response schema for guidelines
@@ -163,11 +165,14 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
 
         parsed_response = guidelines_parser.parse(response)
         return {
+            "status": 200,
             "guidelines": str(parsed_response.get("guidelines", "No guidelines available"))
         }
     except Exception as e:
         return {
-            "guidelines": f"Error: Error processing response: {str(e)}"
+            "status": 403,
+            "guidelines": f"Error: Error processing response",
+            "error": str(e)
         }
 
 
@@ -181,8 +186,10 @@ async def enhance_question_and_answer(llm, question: str, expected_ans: str) -> 
     """
     if not question or not expected_ans:
         return {
+            "status": 403,
             "enhanced_question": "Provide a question and expected answer to enhance the content",
             "enhanced_expected_ans": "Provide a question and expected answer to enhance the content",
+            "error": "Missing required parameters"
         }
 
     # Define response schema for enhanced content
@@ -213,14 +220,17 @@ async def enhance_question_and_answer(llm, question: str, expected_ans: str) -> 
 
         parsed_response = enhanced_content_parser.parse(response)
         return {
+            "status": 200,
             "enhanced_question": str(parsed_response.get("enhanced_question", "No enhanced question available")),
             "enhanced_expected_ans": str(
                 parsed_response.get("enhanced_expected_ans", "No enhanced expected answer available"))
         }
     except Exception as e:
         return {
-            "enhanced_question": f"Error: Error processing response: {str(e)}",
-            "enhanced_expected_ans": f"Error: Error processing response: {str(e)}"
+            "status": 403,
+            "enhanced_question": "Error processing response",
+            "enhanced_expected_ans": "Error processing response", 
+            "error": str(e)
         }
 
 async def score_fill_in_blank(llm, student_ans: str, expected_ans:str, total_score:float, question:str) -> dict:
