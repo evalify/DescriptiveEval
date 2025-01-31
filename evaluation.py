@@ -104,7 +104,7 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
         return json.loads(cached_responses)
 
     query = """
-        SELECT * FROM "QuizResult" WHERE "quizId" = %s;
+        SELECT * FROM "QuizResult" WHERE "quizId" = %s AND "isSubmitted"=true;
     """
     cursor.execute(query, (quiz_id,))
     quiz_responses = cursor.fetchall()
@@ -273,7 +273,11 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             groq_api_keys = itertools.cycle(valid_keys)
             logger.info(f"Using {len(valid_keys)} API keys in rotation for evaluation")
 
-        question_count_by_type = {q: q.count('type') for q in questions}
+        # Count questions by type
+        question_count_by_type = {}
+        for question in questions:
+            q_type = question.get('type', 'UNKNOWN').upper()
+            question_count_by_type[q_type] = question_count_by_type.get(q_type, 0) + 1
 
         with logging_redirect_tqdm(loggers=[logger]):
             for quiz_result in tqdm(quiz_responses, desc="Evaluating quiz responses"):
