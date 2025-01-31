@@ -1,26 +1,23 @@
-from typing import Optional
-from utils.redisQueue.wakeup_workers import spawn_workers, check_workers
-from utils.logger import logger
-import psutil
+import os
 import time
+import uuid
+from typing import Optional
 
+import deprecated
+import psutil
 from fastapi import FastAPI, Depends, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from rq import Queue, Worker
 
-from utils.database import get_postgres_cursor, get_mongo_client, get_redis_client
 from evaluation import bulk_evaluate_quiz_responses
 from model import LLMProvider, get_llm, score, generate_guidelines, enhance_question_and_answer
-
-from rq import Queue, Worker
+from utils.database import get_postgres_cursor, get_mongo_client, get_redis_client
+from utils.logger import logger
 from utils.redisQueue import job as rq_job
-
-import time
-import uuid
-import os
-import psutil
+from utils.redisQueue.wakeup_workers import spawn_workers, check_workers
 
 app = FastAPI()
 logger.info("Initializing FastAPI application")
@@ -34,6 +31,10 @@ app.state.current_provider = LLMProvider.OLLAMA
 app.state.current_model_name = "deepseek-r1:70b"
 app.state.current_api_key = None
 
+app.state.current_micro_llm_provider = LLMProvider.GROQ
+app.state.current_micro_llm_model_name = "llama-3.1-8b-instant"
+app.state.current_micro_llm_api_key = os.getenv("GROQ_API_KEY")
+
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app.add_middleware(
@@ -44,7 +45,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-tasks_queue = Queue("task_queue",connection=get_redis_client())
+tasks_queue = Queue("task_queue", connection=get_redis_client())
+
 
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
@@ -59,6 +61,7 @@ async def log_requests(request: Request, call_next):
     )
     return response
 
+
 class QueryRequest(BaseModel):
     question: str = None
     student_ans: str
@@ -71,6 +74,7 @@ class ProviderRequest(BaseModel):
     provider: str
     provider_model_name: str = None
     provider_api_key: str = None
+    service : str = "macro"
 
 
 class GuidelinesRequest(BaseModel):
@@ -95,7 +99,13 @@ async def read_index():
 
 def get_llm_dependency():
     """Dependency to provide LLM instance based on current provider"""
-    return get_llm(provider=app.state.current_provider, model_name=app.state.current_model_name, api_key=app.state.current_api_key)
+    return get_llm(provider=app.state.current_provider, model_name=app.state.current_model_name,
+                   api_key=app.state.current_api_key)
+
+
+def get_micro_llm_dependency():
+    return get_llm(provider=app.state.current_micro_llm_provider, model_name=app.state.current_micro_llm_model_name,
+                   api_key=app.state.current_micro_llm_api_key)
 
 
 @app.post("/set-provider")
@@ -104,16 +114,24 @@ async def change_provider(request: ProviderRequest):
         provider = LLMProvider(request.provider.lower())
         provider_model_name = request.provider_model_name
         provider_api_key = request.provider_api_key
-        
-        logger.info(f"Changing provider to {provider.value} with model {provider_model_name}")
-        app.state.current_provider = provider
-        app.state.current_model_name = provider_model_name
-        app.state.current_api_key = provider_api_key
-        
+
+        if request.service=="macro":
+            logger.info(f"Changing provider to {provider.value} with model {provider_model_name}")
+            app.state.current_provider = provider
+            app.state.current_model_name = provider_model_name
+            app.state.current_api_key = provider_api_key
+        elif request.service=="micro":
+            logger.info(f"Changing micro provider to {provider.value} with model {provider_model_name}")
+            app.state.current_micro_llm_provider = provider
+            app.state.current_micro_llm_model_name = provider_model_name
+            app.state.current_micro_llm_api_key = provider_api_key
+        else:
+            raise ValueError(f"Invalid service type : {request.service}")
+
         return {"message": f"Successfully switched to {provider.value} provider with model {provider_model_name}"}
     except ValueError as e:
-        logger.error(f"Invalid provider requested: {request.provider}", exc_info=True)
-        return {"error": str(e)}
+        logger.error(f"Error changing provider: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @app.post("/score")
@@ -123,7 +141,7 @@ async def get_response(
 ):
     trace_id = uuid.uuid4()
     logger.info(f"[{trace_id}] Scoring request received for question: {request.question[:100]}...")
-    
+
     try:
         result = await score(
             llm=llm,
@@ -143,11 +161,11 @@ async def get_response(
 @app.post("/generate-guidelines")
 async def generate_guidelines_api(
         request: GuidelinesRequest,
-        llm=Depends(get_llm_dependency)
+        llm=Depends(get_micro_llm_dependency)
 ):
     trace_id = uuid.uuid4()
     logger.info(f"[{trace_id}] Guidelines generation request received for question: {request.question[:100]}...")
-    
+
     try:
         guidelines_result = await generate_guidelines(
             llm,
@@ -165,7 +183,7 @@ async def generate_guidelines_api(
 @app.post("/enhance-qa")
 async def enhance_qa(
         request: QAEnhancementRequest,
-        llm=Depends(get_llm_dependency)
+        llm=Depends(get_micro_llm_dependency)
 ):
     result = await enhance_question_and_answer(
         llm,
@@ -174,7 +192,7 @@ async def enhance_qa(
     )
     return result
 
-
+@deprecated.deprecated(reason="Use /evaluate-queue instead")
 @app.post("/evaluate")  # TODO: Implement Queueing
 async def evaluate_bulk(
         request: EvalRequest,
@@ -191,12 +209,13 @@ async def evaluate_bulk(
             mongo_db,
             redis_client,
             save_to_file=True,
-            llm = llm
+            llm=llm
         )
         return {"message": "Evaluation complete", "results": results}  # TODO: Give more detailed response
     finally:
         postgres_cursor.close()
         postgres_conn.close()
+
 
 @app.post("/evaluate-queue")
 async def evaluate_bulk_queue(
@@ -204,7 +223,7 @@ async def evaluate_bulk_queue(
 ):
     trace_id = uuid.uuid4()
     logger.info(f"[{trace_id}] Queueing evaluation for quiz_id: {request.quiz_id}")
-    
+
     try:
         job = tasks_queue.enqueue(
             rq_job.evaluation_job,
@@ -220,6 +239,7 @@ async def evaluate_bulk_queue(
         logger.error(f"[{trace_id}] Failed to queue evaluation", exc_info=True)
         raise
 
+
 @app.get("/workers/status")
 async def get_workers_status():
     """Get the status of all worker processes"""
@@ -234,12 +254,13 @@ async def get_workers_status():
         logger.error(f"[{trace_id}] Error checking worker status", exc_info=True)
         raise
 
+
 @app.post("/workers/kill/{pid}")
 async def kill_worker(pid: int):
     """Force quit a specific worker process by PID."""
     trace_id = uuid.uuid4()
     logger.info(f"[{trace_id}] Attempting to kill worker with PID: {pid}")
-    
+
     try:
         # Verify the PID belongs to one of our workers
         worker_pids = [p.pid for p in worker_processes]
@@ -248,15 +269,15 @@ async def kill_worker(pid: int):
                 status_code=404,
                 detail=f"No worker found with PID {pid}"
             )
-            
+
         # Get the process and Redis connection
         process = psutil.Process(pid)
         redis_conn = get_redis_client()
-        
+
         # Find the worker in Redis
         workers = Worker.all(connection=redis_conn)
         worker = next((w for w in workers if str(pid) in w.name), None)
-        
+
         if worker:
             # Cancel any current job
             current_job = worker.get_current_job()
@@ -264,18 +285,18 @@ async def kill_worker(pid: int):
                 logger.warning(f"[{trace_id}] Cancelling job {current_job.id} on worker {pid}")
                 current_job.cancel()
                 current_job.save()
-            
+
             # Deregister the worker
             worker.register_death()
             logger.info(f"[{trace_id}] Deregistered worker {pid} from Redis")
-        
+
         # Verify it's actually our worker python process
         if not process.name().lower().startswith('python'):
             raise HTTPException(
                 status_code=400,
                 detail=f"Process {pid} is not a Python worker process"
             )
-        
+
         # Kill the process and its children
         children = process.children(recursive=True)
         for child in children:
@@ -283,16 +304,16 @@ async def kill_worker(pid: int):
                 child.kill()
             except psutil.NoSuchProcess:
                 pass
-        
+
         # Try graceful termination first
         process.terminate()
-        
+
         try:
             process.wait(timeout=3)  # Reduced timeout since we're being more aggressive
         except psutil.TimeoutExpired:
             logger.warning(f"[{trace_id}] Worker {pid} did not terminate gracefully, forcing kill")
             process.kill()
-        
+
         # Ensure the process is dead
         max_wait = 5
         start_time = time.time()
@@ -305,18 +326,18 @@ async def kill_worker(pid: int):
                 status_code=500,
                 detail=f"Failed to terminate worker {pid} after {max_wait} seconds"
             )
-        
+
         logger.info(f"[{trace_id}] Successfully terminated worker {pid}")
-        
+
         # Get updated worker status
         time.sleep(0.5)  # Short delay to let system update
         status_info = check_workers(worker_processes)  # Direct call, not async
-        
+
         return {
             "message": f"Worker {pid} terminated successfully",
             "workers": status_info
         }
-        
+
     except psutil.NoSuchProcess:
         logger.error(f"[{trace_id}] Worker {pid} not found")
         raise HTTPException(
@@ -337,6 +358,7 @@ async def kill_worker(pid: int):
             status_code=500,
             detail=f"Failed to kill worker {pid}: {str(e)}"
         )
+
 
 if __name__ == "__main__":
     import uvicorn
