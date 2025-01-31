@@ -6,8 +6,9 @@ import asyncio
 import itertools
 import json
 import os
-from typing import List, Dict, Any, Optional
 from datetime import datetime
+from typing import List, Dict, Any, Optional
+
 from dotenv import load_dotenv
 from redis import Redis
 from tqdm import tqdm
@@ -15,17 +16,19 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 
 # Custom imports
 from model import score, LLMProvider, get_llm, generate_guidelines, score_fill_in_blank
+from utils.errors import *
 from utils.evaluation.code_eval import evaluate_coding_question
+from utils.evaluation.static_eval import evaluate_mcq, evaluate_mcq_with_partial_marking, evaluate_true_false, \
+    direct_match
+from utils.logger import logger
 from utils.misc import DateTimeEncoder, remove_html_tags, save_quiz_data
 from utils.quiz.quiz_report import generate_quiz_report, save_quiz_report
 from utils.quiz.quiz_schema import QuizResponseSchema
-from utils.evaluation.static_eval import evaluate_mcq, evaluate_mcq_with_partial_marking, evaluate_true_false, direct_match
-from utils.logger import logger
-from utils.errors import *
 
 load_dotenv()
 CACHE_EX = int(os.getenv('CACHE_EX', 3600))  # Cache expiry time in seconds
 MAX_RETRIES = int(os.getenv('MAX_RETRIES', 10))  # Maximum number of retries for LLM evaluation
+
 
 async def get_guidelines(redis_client: Redis, llm, question_id: str, question: str, expected_answer: str,
                          total_score: int):
@@ -33,16 +36,17 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
     cached_guidelines = redis_client.get(question_id + '_guidelines_cache')
     if (cached_guidelines):
         return json.loads(cached_guidelines)
-        
+
     guidelines = None
     errors = []
-    
+
     for attempt in range(MAX_RETRIES):
         try:
             guidelines = await generate_guidelines(llm, question, expected_answer, total_score)
             if guidelines['guidelines'].startswith(("Error:", "Error processing response:")):
                 error_msg = guidelines['guidelines']
-                logger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES}: Failed to generate guidelines for question {question_id}: {error_msg}")
+                logger.warning(
+                    f"Attempt {attempt + 1}/{MAX_RETRIES}: Failed to generate guidelines for question {question_id}: {error_msg}")
                 errors.append(error_msg)
                 continue
             break
@@ -50,14 +54,16 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
             error_msg = f"Unexpected error generating guidelines: {str(e)}"
             logger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}")
             errors.append(error_msg)
-            
+
     if guidelines is None:
         error_details = "\n".join(errors)
-        raise LLMEvaluationError(f"Failed to generate guidelines after {MAX_RETRIES} attempts.\nErrors encountered:\n{error_details}")
-        
+        raise LLMEvaluationError(
+            f"Failed to generate guidelines after {MAX_RETRIES} attempts.\nErrors encountered:\n{error_details}")
+
     redis_client.set(question_id + '_guidelines_cache', json.dumps(guidelines), ex=CACHE_EX)
     logger.info(f"Successfully generated and cached guidelines for question {question_id}")
     return guidelines
+
 
 def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=True):
     """
@@ -177,10 +183,10 @@ async def validate_quiz_setup(quiz_id: str, questions: List[dict], responses: Li
     """Validate quiz setup before starting evaluation."""
     if not questions:
         raise NoQuestionsError(f"Quiz {quiz_id} has no questions configured")
-    
+
     if not responses:
         raise NoResponsesError(f"Quiz {quiz_id} has no submitted responses")
-    
+
     # Validate question completeness
     invalid_questions = []
     for q in questions:
@@ -197,13 +203,13 @@ async def validate_quiz_setup(quiz_id: str, questions: List[dict], responses: Li
             issues.append('missing expected answer')
         if issues:
             invalid_questions.append(f"Question {q.get('_id')}: {', '.join(issues)}")
-    
+
     if invalid_questions:
         raise InvalidQuestionError(
-            f"Quiz {quiz_id} has invalid questions:\n" + 
+            f"Quiz {quiz_id} has invalid questions:\n" +
             "\n".join(invalid_questions)
         )
-    
+
 
 async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db,
                                        redis_client: Redis, save_to_file=True, llm=None, override_evaluated=False):
@@ -250,7 +256,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 "- Negative marking: False\n"
                 "- MCQ partial marking: False"
             )
-            
+
         negative_marking = evaluation_settings.get("negativeMark", False)
         mcq_partial_marking = evaluation_settings.get("mcqPartialMark", False)
 
@@ -266,6 +272,9 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 )
             groq_api_keys = itertools.cycle(valid_keys)
             logger.info(f"Using {len(valid_keys)} API keys in rotation for evaluation")
+
+        question_count_by_type = {q: q.count('type') for q in questions}
+
         with logging_redirect_tqdm(loggers=[logger]):
             for quiz_result in tqdm(quiz_responses, desc="Evaluating quiz responses"):
                 if quiz_result.get("isEvaluated") == 'EVALUATED':
@@ -282,10 +291,9 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 #             f"Quiz data: {json.dumps(quiz_result, indent=2)}"
                 #         )
 
-
                 for question in questions:
                     qid = str(question["_id"])
-                    
+
                     # Handle old schema conversion
                     if isinstance(quiz_result["responses"].get(qid), list):
                         quiz_result["responses"][qid] = {
@@ -293,7 +301,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         }
                         if "questionMarks" in quiz_result:
                             del quiz_result["questionMarks"]
-                    
+
                     # Validate question marks
                     try:
                         if question.get("marks") is not None:
@@ -339,7 +347,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
                                     QuizResponseSchema.set_attribute(quiz_result, qid, 'score', mcq_score)
                                     if negative_marking and mcq_score <= 0:
-                                        neg_score = question.get("negativeMark", -question_total_score/2)
+                                        neg_score = question.get("negativeMark", -question_total_score / 2)
                                         QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score', neg_score)
                                         # logger.info(f"Applied negative marking ({neg_score}) for incorrect MCQ answer in {qid}")
                                     else:
@@ -353,7 +361,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                 clean_question = remove_html_tags(question['question']).strip()
                                 student_answer = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
 
-                                if await direct_match(student_answer, question["expectedAnswer"], strip=True, case_sensitive=False):
+                                if await direct_match(student_answer, question["expectedAnswer"], strip=True,
+                                                      case_sensitive=False):
                                     score_res = {
                                         "score": question_total_score,
                                         "reason": "Exact Match",
@@ -369,7 +378,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                         expected_answer=question["expectedAnswer"],
                                         total_score=question_total_score
                                     )
-                                    
+
                                     errors = []
                                     for attempt in range(MAX_RETRIES):
                                         try:
@@ -381,12 +390,13 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                 total_score=question_total_score,
                                                 guidelines=question_guidelines
                                             )
-                                            
-                                            if any(score_res[key].startswith("Error:") for key in ["breakdown", "rubric"]):
+
+                                            if any(score_res[key].startswith("Error:") for key in
+                                                   ["breakdown", "rubric"]):
                                                 error_msg = f"LLM returned error response: {score_res}"
                                                 logger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}")
                                                 errors.append(error_msg)
-                                                
+
                                                 if not llm:
                                                     current_llm = get_llm(
                                                         LLMProvider.GROQ,
@@ -394,13 +404,13 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                         'llama-3.3-70b-versatile' if attempt > 5 else None
                                                     )
                                                 continue
-                                                
+
                                             break
                                         except Exception as e:
                                             error_msg = f"Unexpected error during scoring: {str(e)}"
                                             logger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}")
                                             errors.append(error_msg)
-                                            
+
                                             if not llm:
                                                 current_llm = get_llm(
                                                     LLMProvider.GROQ,
@@ -466,10 +476,11 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                     )
 
                                 try:
-                                    tf_score = await evaluate_true_false(response[0], correct_answer, question_total_score)
+                                    tf_score = await evaluate_true_false(response[0], correct_answer,
+                                                                         question_total_score)
                                     QuizResponseSchema.set_attribute(quiz_result, qid, 'score', tf_score)
                                     if negative_marking and tf_score <= 0:
-                                        neg_score = question.get("negativeMark", -question_total_score/2)
+                                        neg_score = question.get("negativeMark", -question_total_score / 2)
                                         QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score', neg_score)
                                         # logger.info(f"Applied negative marking ({neg_score}) for incorrect True/False answer in {qid}")
                                     else:
@@ -501,7 +512,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                 else:
                                     current_llm = llm if llm else get_llm(LLMProvider.GROQ, next(groq_api_keys))
                                     clean_question = remove_html_tags(question['question']).strip()
-                                    
+
                                     evaluation_attempts = []
                                     for attempt in range(MAX_RETRIES):
                                         try:
@@ -514,7 +525,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                             )
 
                                             if fitb_score is None or fitb_score.get('reason', '').startswith("Error:"):
-                                                error_msg = fitb_score.get('reason') if fitb_score else "No response from LLM"
+                                                error_msg = fitb_score.get(
+                                                    'reason') if fitb_score else "No response from LLM"
                                                 logger.warning(
                                                     f"Attempt {attempt + 1}/{MAX_RETRIES} failed for question {qid}. "
                                                     f"Error: {error_msg}"
@@ -523,7 +535,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                     'error': error_msg,
                                                     'model': current_llm.__class__.__name__
                                                 })
-                                                
+
                                                 if not llm:
                                                     current_llm = get_llm(
                                                         LLMProvider.GROQ,
@@ -532,7 +544,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                     )
                                                 continue
                                             break
-                                            
+
                                         except Exception as e:
                                             error_msg = f"Unexpected error: {str(e)}"
                                             logger.warning(
@@ -543,7 +555,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                 'error': error_msg,
                                                 'model': current_llm.__class__.__name__
                                             })
-                                            
+
                                             if not llm:
                                                 current_llm = get_llm(
                                                     LLMProvider.GROQ,
@@ -552,9 +564,9 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                 )
                                     else:
                                         raise FillInBlankEvaluationError(qid, evaluation_attempts, MAX_RETRIES)
-                                
+
                                 QuizResponseSchema.set_attribute(quiz_result, qid, 'score', fitb_score["score"])
-                                QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', fitb_score['reason'])            
+                                QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', fitb_score['reason'])
 
                             case _:
                                 logger.warning(f"Unhandled question type: {question.get('type')!r} for question {qid}")
@@ -570,7 +582,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
                 # Calculate total score including negative marking
                 quiz_result["score"] = sum([
-                    QuizResponseSchema.get_attribute(quiz_result, qid, 'score') + 
+                    QuizResponseSchema.get_attribute(quiz_result, qid, 'score') +
                     (QuizResponseSchema.get_attribute(quiz_result, qid, 'negative_score') or 0)
                     for qid in quiz_result["responses"].keys()
                 ])
@@ -579,8 +591,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 await set_quiz_response(pg_cursor, pg_conn, quiz_result)
 
     except Exception as e:
-        if isinstance(e, (NoQuestionsError, NoResponsesError, InvalidQuestionError, 
-                        LLMEvaluationError, TotalScoreError, DatabaseConnectionError)):
+        if isinstance(e, (NoQuestionsError, NoResponsesError, InvalidQuestionError,
+                          LLMEvaluationError, TotalScoreError, DatabaseConnectionError)):
             # These are already formatted nicely, just log them
             logger.error(str(e))
         else:
@@ -601,21 +613,28 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             # Generate and save quiz report
             quiz_report = await generate_quiz_report(quiz_id, quiz_responses, questions)
             await save_quiz_report(quiz_id, quiz_report, pg_cursor, pg_conn, save_to_file)
-            
+
             # Update evaluation status
             pg_cursor.execute(
                 """UPDATE "Quiz" SET "isEvaluated" = 'EVALUATED' WHERE "id" = %s""",
                 (quiz_id,)
             )
             pg_conn.commit()
-            
-            save_quiz_data({'status': 'EVALUATED', 'timestamp': str(datetime.now().isoformat())}, quiz_id, 'status')
-                    
+
+            save_quiz_data(
+                {
+                    'status': 'EVALUATED',
+                    'timestamp': str(datetime.now().isoformat()),
+                    'questions_count_by_type': question_count_by_type
+                },
+                quiz_id, 'metadata')
+
         except Exception as e:
             logger.error(f"Error in evaluation cleanup for quiz {quiz_id}: {str(e)}", exc_info=True)
             raise EvaluationError(f"Evaluation completed but failed during cleanup: {str(e)}")
 
     return quiz_responses
+
 
 if __name__ == "__main__":
     from utils.database import get_postgres_cursor, get_mongo_client, get_redis_client
@@ -624,7 +643,7 @@ if __name__ == "__main__":
     my_mongo_db = get_mongo_client()
     my_redis_client = get_redis_client()
 
-    my_quiz_id = "cm64ucvy80015xy0kvcg3ubno"
+    my_quiz_id = "cm64j3ypn001xxyljz4ku81rd"
     # Evaluate quiz responses
     asyncio.run(bulk_evaluate_quiz_responses(
         quiz_id=my_quiz_id,

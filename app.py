@@ -28,11 +28,11 @@ logger.info(f"Initialized {len(worker_processes)} worker processes")
 
 # Store current provider in app state
 app.state.current_provider = LLMProvider.OLLAMA
-app.state.current_model_name = "deepseek-r1:70b"
+app.state.current_model_name = "deepseek-r1:32b"
 app.state.current_api_key = None
 
 app.state.current_micro_llm_provider = LLMProvider.GROQ
-app.state.current_micro_llm_model_name = "llama-3.1-8b-instant"
+app.state.current_micro_llm_model_name = "llama-3.3-70b-specdec"
 app.state.current_micro_llm_api_key = os.getenv("GROQ_API_KEY")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -74,7 +74,7 @@ class ProviderRequest(BaseModel):
     provider: str
     provider_model_name: str = None
     provider_api_key: str = None
-    service : str = "macro"
+    service: str = "macro"
 
 
 class GuidelinesRequest(BaseModel):
@@ -115,12 +115,12 @@ async def change_provider(request: ProviderRequest):
         provider_model_name = request.provider_model_name
         provider_api_key = request.provider_api_key
 
-        if request.service=="macro":
+        if request.service == "macro":
             logger.info(f"Changing provider to {provider.value} with model {provider_model_name}")
             app.state.current_provider = provider
             app.state.current_model_name = provider_model_name
             app.state.current_api_key = provider_api_key
-        elif request.service=="micro":
+        elif request.service == "micro":
             logger.info(f"Changing micro provider to {provider.value} with model {provider_model_name}")
             app.state.current_micro_llm_provider = provider
             app.state.current_micro_llm_model_name = provider_model_name
@@ -192,6 +192,7 @@ async def enhance_qa(
     )
     return result
 
+
 @deprecated.deprecated(reason="Use /evaluate instead")
 @app.post("/evaluate-wo-queue")  # TODO: Implement Queueing
 async def evaluate_bulk(
@@ -215,6 +216,35 @@ async def evaluate_bulk(
     finally:
         postgres_cursor.close()
         postgres_conn.close()
+
+
+@app.get("/queued-quizzes") 
+async def get_queued_quizzes():
+    """Get all currently queued quiz evaluation jobs."""
+    trace_id = uuid.uuid4()
+    logger.info(f"[{trace_id}] Fetching queued quiz evaluations")
+    
+    try:
+        queued_jobs = tasks_queue.get_jobs()
+        queued_quizzes = []
+        for job in queued_jobs:
+            quiz_id = job.args[0] if job.args else None
+            queued_quizzes.append({
+                "job_id": job.id,
+                "quiz_id": quiz_id,
+                "enqueued_at": job.enqueued_at.isoformat() if job.enqueued_at else None,
+                "status": job.get_status()
+            })
+        
+        logger.info(f"[{trace_id}] Found {len(queued_quizzes)} queued quiz evaluations")
+        return {"queued_quizzes": queued_quizzes}
+        
+    except Exception as e:
+        logger.error(f"[{trace_id}] Error fetching queued quizzes", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to fetch queued quizzes: {str(e)}"
+        )
 
 
 @app.post("/evaluate")
