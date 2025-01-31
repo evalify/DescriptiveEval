@@ -231,7 +231,7 @@ async def evaluate_bulk_queue(
             app.state.current_provider,
             app.state.current_model_name,
             app.state.current_api_key,
-            job_timeout=os.getenv('WORKER_TTL', 3600)
+            job_timeout=int(os.getenv('WORKER_TTL', '3600'))
         )
         logger.info(f"[{trace_id}] Successfully queued evaluation job. Job ID: {job.id}")
         return {"message": "Evaluation queued", "job_id": job.id}
