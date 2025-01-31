@@ -7,7 +7,7 @@ import itertools
 import json
 import os
 from typing import List, Dict, Any, Optional
-
+from datetime import datetime
 from dotenv import load_dotenv
 from redis import Redis
 from tqdm import tqdm
@@ -204,15 +204,9 @@ async def validate_quiz_setup(quiz_id: str, questions: List[dict], responses: Li
             "\n".join(invalid_questions)
         )
     
-    # Check for total score consistency
-    total_scores = {r['totalScore'] for r in responses}
-    if 0 in total_scores:
-        raise TotalScoreError(quiz_id, total_scores, "Zero total score found")
-    if len(total_scores) > 1:
-        raise TotalScoreError(quiz_id, total_scores, "Inconsistent total scores")
 
 async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db,
-                                       redis_client: Redis, save_to_file=True, llm=None, override_evaluated=True):
+                                       redis_client: Redis, save_to_file=True, llm=None, override_evaluated=False):
     """
     Evaluate all responses for a quiz with rubric caching and parallel processing.
     
@@ -280,6 +274,15 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         continue
                     logger.info(f"Re-evaluating quiz response {quiz_result['id']}")
                 quiz_result["totalScore"] = 0
+
+                # for question_id in quiz_result["responses"]:
+                #     if question_id not in [str(q["_id"]) for q in questions]:
+                #         raise InvalidQuestionError(
+                #             f"Question {question_id} not found in mongoDB questions {quiz_id}.\n"
+                #             f"Quiz data: {json.dumps(quiz_result, indent=2)}"
+                #         )
+
+
                 for question in questions:
                     qid = str(question["_id"])
                     
@@ -592,6 +595,9 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
     finally:
         try:
+            if save_to_file:
+                save_quiz_data(quiz_responses, quiz_id, 'responses_evaluated')
+
             # Generate and save quiz report
             quiz_report = await generate_quiz_report(quiz_id, quiz_responses, questions)
             await save_quiz_report(quiz_id, quiz_report, pg_cursor, pg_conn, save_to_file)
@@ -603,8 +609,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             )
             pg_conn.commit()
             
-            if save_to_file:
-                save_quiz_data(quiz_responses, quiz_id, 'responses_evaluated')
+            save_quiz_data({'status': 'EVALUATED', 'timestamp': str(datetime.now().isoformat())}, quiz_id, 'status')
                     
         except Exception as e:
             logger.error(f"Error in evaluation cleanup for quiz {quiz_id}: {str(e)}", exc_info=True)
