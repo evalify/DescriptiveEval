@@ -17,7 +17,7 @@ class DateTimeEncoder(json.JSONEncoder):
 
 # Create a function that will remove all html tags in a given string
 def remove_html_tags(data):
-    p = re.compile(r'<.*?>')
+    p = re.compile(r'<.*?>')    #TODO: Escape html tags when question itself needs explicit html tags like a UI quiz
     return p.sub('', data)
 
 

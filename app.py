@@ -192,8 +192,8 @@ async def enhance_qa(
     )
     return result
 
-@deprecated.deprecated(reason="Use /evaluate-queue instead")
-@app.post("/evaluate")  # TODO: Implement Queueing
+@deprecated.deprecated(reason="Use /evaluate instead")
+@app.post("/evaluate-wo-queue")  # TODO: Implement Queueing
 async def evaluate_bulk(
         request: EvalRequest,
         llm=Depends(get_llm_dependency)
@@ -217,7 +217,7 @@ async def evaluate_bulk(
         postgres_conn.close()
 
 
-@app.post("/evaluate-queue")
+@app.post("/evaluate")
 async def evaluate_bulk_queue(
         request: EvalRequest,
 ):
