@@ -91,7 +91,13 @@ class QAEnhancementRequest(BaseModel):
 class EvalRequest(BaseModel):
     quiz_id: str
     override_evaluated: bool = False
-    types_to_evaluate: Optional[dict] = None
+    types_to_evaluate: Optional[dict] = {
+            'MCQ': True,
+            'DESCRIPTIVE': True,
+            'CODING': True,
+            'TRUE_FALSE': True,
+            'FILL_IN_BLANK': True
+        }
 
 
 @app.get("/")

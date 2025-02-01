@@ -246,6 +246,13 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             'TRUE_FALSE': True,
             'FILL_IN_BLANK': True
         }
+
+    if override_evaluated:
+        # Set isEvaluated to UNEVALUATED for all responses
+        pg_cursor.execute(
+            """UPDATE "QuizResult" SET "isEvaluated" = 'UNEVALUATED' WHERE "quizId" = %s""",
+            (quiz_id,)
+        )
     try:
         # Get quiz data with better error handling
         try:
@@ -328,7 +335,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         logger.info(f"Skipping evaluation for question {qid} of type {question_type} as per types_to_evaluate")
                         continue
 
-                    if not quiz_result["responses"] and qid not in quiz_result["responses"]:
+                    if not quiz_result["responses"] or qid not in quiz_result["responses"]:
                         continue
 
                     # Handle old schema conversion
@@ -650,7 +657,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             },
             quiz_id, 'metadata')
 
-        raise
+        # raise
 
     else:
         try:
