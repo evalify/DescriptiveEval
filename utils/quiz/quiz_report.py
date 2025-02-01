@@ -35,6 +35,7 @@ from typing import Any, Dict, List
 import json
 import asyncio
 import uuid
+import os
 from utils.misc import save_quiz_data
 from utils.logger import logger
 
@@ -101,44 +102,53 @@ async def save_quiz_report(quiz_id: str, report: Dict[str, Any], cursor, conn, s
     :param conn: Database connection
     :param save_to_file: Whether to save to a file (default: True)
     """
-    try:
-        # Save to database
-        await asyncio.to_thread(
-            cursor.execute,
-            """INSERT INTO "QuizReport" (
-                "id", "quizId", "maxScore", "avgScore", "minScore", 
-                "totalScore", "totalStudents", "questionStats", "markDistribution", "evaluatedAt"
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-            ON CONFLICT ("quizId") 
-            DO UPDATE SET 
-                "maxScore" = EXCLUDED."maxScore",
-                "avgScore" = EXCLUDED."avgScore",
-                "minScore" = EXCLUDED."minScore",
-                "totalScore" = EXCLUDED."totalScore",
-                "totalStudents" = EXCLUDED."totalStudents",
-                "questionStats" = EXCLUDED."questionStats",
-                "markDistribution" = EXCLUDED."markDistribution",
-                "evaluatedAt" = NOW()
-            """,
-            (
-                uuid.uuid4().hex,
-                quiz_id,
-                report['maxScore'],
-                report['avgScore'],
-                report['minScore'],
-                report['totalScore'],
-                report['totalStudents'],
-                json.dumps(report['questionStats']),
-                json.dumps(report['markDistribution']),
+    retries = 0
+    max_retries = int(os.getenv('DB_MAX_RETRIES', 3))
+    while retries < max_retries:
+        try:
+            # Save to database
+            await asyncio.to_thread(
+                cursor.execute,
+                """INSERT INTO "QuizReport" (
+                    "id", "quizId", "maxScore", "avgScore", "minScore", 
+                    "totalScore", "totalStudents", "questionStats", "markDistribution", "evaluatedAt"
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                ON CONFLICT ("quizId") 
+                DO UPDATE SET 
+                    "maxScore" = EXCLUDED."maxScore",
+                    "avgScore" = EXCLUDED."avgScore",
+                    "minScore" = EXCLUDED."minScore",
+                    "totalScore" = EXCLUDED."totalScore",
+                    "totalStudents" = EXCLUDED."totalStudents",
+                    "questionStats" = EXCLUDED."questionStats",
+                    "markDistribution" = EXCLUDED."markDistribution",
+                    "evaluatedAt" = NOW()
+                """,
+                (
+                    uuid.uuid4().hex,
+                    quiz_id,
+                    report['maxScore'],
+                    report['avgScore'], 
+                    report['minScore'],
+                    report['totalScore'],
+                    report['totalStudents'],
+                    json.dumps(report['questionStats']),
+                    json.dumps(report['markDistribution']),
+                )
             )
-        )
-        await asyncio.to_thread(conn.commit)
-        logger.info(f"Saved quiz report to database for quiz {quiz_id}")
+            await asyncio.to_thread(conn.commit)
+            logger.info(f"Saved quiz report to database for quiz {quiz_id}")
 
-        # Save to file if requested
-        if save_to_file:
-            save_quiz_data(report, quiz_id, 'report')
-            
-    except Exception as e:
-        logger.error(f"Failed to save quiz report in db for quiz {quiz_id}: {str(e)}", exc_info=True)
-        raise
+            # Save to file if requested
+            if save_to_file:
+                save_quiz_data(report, quiz_id, 'report')
+            break
+
+        except Exception as e:
+            retries += 1
+            if retries == max_retries:
+                logger.error(f"Failed to save quiz report in db for quiz {quiz_id}: {str(e)}", exc_info=True)
+                raise
+            wait_time = (2 ** retries)  # Exponential backoff: 2,4,8 seconds
+            logger.warning(f"Retrying database update in {wait_time} seconds... (Attempt {retries}/{max_retries})")
+            await asyncio.sleep(wait_time)

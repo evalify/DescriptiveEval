@@ -128,14 +128,27 @@ async def set_quiz_response(cursor, conn, response: dict):
     :param conn: PostgresSQL connection for database operations
     :param response: The evaluated response to update in the database
     """
-    await asyncio.to_thread(
-        cursor.execute,
-        """UPDATE "QuizResult" 
-           SET "responses" = %s, "score" = %s, "totalScore" = %s, "isEvaluated" = 'EVALUATED'
-           WHERE "id" = %s""",
-        (json.dumps(response["responses"]), response["score"], response["totalScore"], response["id"])
-    )  # TODO: Update query to check if isSubmitted is True
-    await asyncio.to_thread(conn.commit)
+    retries = 0
+    max_retries = int(os.getenv('DB_MAX_RETRIES', 3))
+    while retries < max_retries:
+        try:
+            await asyncio.to_thread(
+                cursor.execute,
+                """UPDATE "QuizResult" 
+                   SET "responses" = %s, "score" = %s, "totalScore" = %s, "isEvaluated" = 'EVALUATED'
+                   WHERE "id" = %s""",
+                (json.dumps(response["responses"]), response["score"], response["totalScore"], response["id"])
+            )
+            await asyncio.to_thread(conn.commit)
+            break
+        except Exception as e:
+            retries += 1
+            if retries == max_retries:
+                logger.error(f"Failed to update quiz response after {max_retries} retries: {str(e)}")
+                raise
+            wait_time = (2 ** retries)  # Exponential backoff: 2,4,8 seconds
+            logger.warning(f"Retrying database update in {wait_time} seconds... (Attempt {retries}/{max_retries})")
+            await asyncio.sleep(wait_time)
 
 
 def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=True):
@@ -213,7 +226,7 @@ async def validate_quiz_setup(quiz_id: str, questions: List[dict], responses: Li
 
 async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db,
                                        redis_client: Redis, save_to_file: bool = True, llm=None,
-                                       override_evaluated:bool=False, types_to_evaluate:bool=None):
+                                       override_evaluated: bool = False, types_to_evaluate: bool = None):
     """
     Evaluate all responses for a quiz with rubric caching and parallel processing.
     
@@ -278,6 +291,10 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         negative_marking = evaluation_settings.get("negativeMark", False)
         mcq_partial_marking = evaluation_settings.get("mcqPartialMark", False)
 
+        logger.info(f"Evaluation Settings for quiz {quiz_id}:\n")
+        logger.info(f"Negative Marking: {negative_marking}")
+        logger.info(f"MCQ Partial Marking: {mcq_partial_marking}")
+
         # Initialize LLM with API key rotation
         if llm is None:
             logger.info("No LLM instance provided. Using default Groq API key rotation")
@@ -326,13 +343,18 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 if invalid_questions:
                     raise ResponseQuestionMismatchError(quiz_id, invalid_questions)
 
-                for question in questions:
+                questions_progress = tqdm(questions, desc=f"ResponseId:{quiz_result['id']}", unit="question",
+                                          leave=False, dynamic_ncols=True)
+                for question in questions_progress:
                     qid = str(question["_id"])
                     question_type = question.get("type", "").upper()
-                    
+
                     # Skip question if its type is not in types_to_evaluate
-                    if types_to_evaluate and not types_to_evaluate.get(question_type, types_to_evaluate.get(question_type.lower(), True)):
-                        logger.info(f"Skipping evaluation for question {qid} of type {question_type} as per types_to_evaluate")
+                    if types_to_evaluate and not types_to_evaluate.get(question_type,
+                                                                       types_to_evaluate.get(question_type.lower(),
+                                                                                             True)):
+                        logger.info(
+                            f"Skipping evaluation for question {qid} of type {question_type} as per types_to_evaluate")
                         continue
 
                     if not quiz_result["responses"] or qid not in quiz_result["responses"]:
@@ -623,11 +645,11 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                         raise
 
                 # Calculate total score including negative marking
-                quiz_result["score"] = sum([
+                quiz_result["score"] = max(sum([
                     QuizResponseSchema.get_attribute(quiz_result, qid, 'score') +
                     (QuizResponseSchema.get_attribute(quiz_result, qid, 'negative_score') or 0)
                     for qid in quiz_result["responses"].keys()
-                ])
+                ]), 0)
 
                 # Save result back to database
                 await set_quiz_response(pg_cursor, pg_conn, quiz_result)
