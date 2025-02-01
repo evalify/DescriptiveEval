@@ -90,6 +90,7 @@ class QAEnhancementRequest(BaseModel):
 
 class EvalRequest(BaseModel):
     quiz_id: str
+    override_evaluated: bool = False
 
 
 @app.get("/")
@@ -261,6 +262,7 @@ async def evaluate_bulk_queue(
             app.state.current_provider,
             app.state.current_model_name,
             app.state.current_api_key,
+            request.override_evaluated,
             job_timeout=int(os.getenv('WORKER_TTL', '3600'))
         )
         logger.info(f"[{trace_id}] Successfully queued evaluation job. Job ID: {job.id}")
