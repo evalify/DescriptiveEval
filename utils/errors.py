@@ -86,3 +86,16 @@ class TotalScoreError(EvaluationError):
 class DatabaseConnectionError(EvaluationError):
     """Raised when database operations fail"""
     pass
+
+class ResponseQuestionMismatchError(EvaluationError):
+    """Raised when response contains question IDs that don't exist in quiz questions"""
+    def __init__(self, quiz_id: str, invalid_questions: set):
+        self.invalid_questions = invalid_questions
+        super().__init__(
+            f"Response contains invalid question IDs for quiz {quiz_id}.\n"
+            f"Invalid question IDs: {sorted(invalid_questions)}\n"
+            "This could indicate:\n"
+            "- Data corruption in responses\n"
+            "- Questions were removed from quiz after responses were submitted\n"
+            "- Database synchronization issues between questions and responses"
+        )

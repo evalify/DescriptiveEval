@@ -278,9 +278,11 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         for question in questions:
             q_type = question.get('type', 'UNKNOWN').upper()
             question_count_by_type[q_type] = question_count_by_type.get(q_type, 0) + 1
-
+        time_taken = None
         with logging_redirect_tqdm(loggers=[logger]):
-            for quiz_result in tqdm(quiz_responses, desc="Evaluating quiz responses"):
+            progress_bar = tqdm(quiz_responses, desc="Evaluating responses", unit="response", dynamic_ncols=True)
+            for quiz_result in progress_bar:
+                time_taken = progress_bar.format_dict['elapsed']
                 if quiz_result.get("isEvaluated") == 'EVALUATED':
                     if not override_evaluated:
                         logger.info(f"Skipping evaluation for already evaluated quiz response {quiz_result['id']}")
@@ -288,15 +290,17 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                     logger.info(f"Re-evaluating quiz response {quiz_result['id']}")
                 quiz_result["totalScore"] = 0
 
-                # for question_id in quiz_result["responses"]:
-                #     if question_id not in [str(q["_id"]) for q in questions]:
-                #         raise InvalidQuestionError(
-                #             f"Question {question_id} not found in mongoDB questions {quiz_id}.\n"
-                #             f"Quiz data: {json.dumps(quiz_result, indent=2)}"
-                #         )
-
+                response_question_ids = set(quiz_result["responses"])
+                valid_question_ids = {str(q["_id"]) for q in questions}
+                invalid_questions = response_question_ids - valid_question_ids
+                if invalid_questions:
+                    raise ResponseQuestionMismatchError(quiz_id, invalid_questions)
+                
                 for question in questions:
                     qid = str(question["_id"])
+
+                    if not quiz_result["responses"] and qid not in quiz_result["responses"]:
+                        continue
 
                     # Handle old schema conversion
                     if isinstance(quiz_result["responses"].get(qid), list):
@@ -318,8 +322,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                             f"Question data: {json.dumps(question, indent=2)}"
                         )
 
-                    if qid not in quiz_result["responses"]:
-                        continue
+                    
 
                     # Question type specific evaluation
                     try:
@@ -607,6 +610,17 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 f"Error Details: {str(e)}\n"
                 "Stack trace:", exc_info=True
             )
+
+        save_quiz_data(
+                {
+                    'status': 'FAILED',
+                    'error': str(e),
+                    'time_taken': time_taken,
+                    'timestamp': str(datetime.now().isoformat()),
+                    'questions_count_by_type': question_count_by_type
+                },
+                quiz_id, 'metadata')
+        
         raise
 
     else:
@@ -625,6 +639,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             save_quiz_data(
                 {
                     'status': 'EVALUATED',
+                    'error': None,
+                    'time_taken': time_taken,
                     'timestamp': str(datetime.now().isoformat()),
                     'questions_count_by_type': question_count_by_type
                 },
@@ -648,7 +664,7 @@ if __name__ == "__main__":
     my_mongo_db = get_mongo_client()
     my_redis_client = get_redis_client()
 
-    my_quiz_id = "cm64j3ypn001xxyljz4ku81rd"
+    my_quiz_id = "cm64n3edl0006xyrxnp4llbe4"
     # Evaluate quiz responses
     asyncio.run(bulk_evaluate_quiz_responses(
         quiz_id=my_quiz_id,
