@@ -395,7 +395,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                 guidelines=question_guidelines
                                             )
 
-                                            if any(score_res[key].startswith("Error:") for key in
+                                            if any(score_res[key].startswith("Error:") for key in    # TODO: Use status codes instead
                                                    ["breakdown", "rubric"]):
                                                 error_msg = f"LLM returned error response: {score_res}"
                                                 logger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}")
@@ -609,11 +609,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             )
         raise
 
-    finally:
+    else:
         try:
-            if save_to_file:
-                save_quiz_data(quiz_responses, quiz_id, 'responses_evaluated')
-
             # Generate and save quiz report
             quiz_report = await generate_quiz_report(quiz_id, quiz_responses, questions)
             await save_quiz_report(quiz_id, quiz_report, pg_cursor, pg_conn, save_to_file)
@@ -636,6 +633,10 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         except Exception as e:
             logger.error(f"Error in evaluation cleanup for quiz {quiz_id}: {str(e)}", exc_info=True)
             raise EvaluationError(f"Evaluation completed but failed during cleanup: {str(e)}")
+    
+    finally:
+            if save_to_file:
+                save_quiz_data(quiz_responses, quiz_id, 'responses_evaluated')
 
     return quiz_responses
 
