@@ -94,7 +94,8 @@ async def score(llm, student_ans:str, expected_ans:str, total_score:float, quest
     _input = prompt_template.format(
         student_ans=student_ans,
         expected_ans=expected_ans,
-        total_score=total_score
+        total_score=total_score,
+        errors=errors
     )
 
     try:
