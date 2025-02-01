@@ -103,4 +103,8 @@ Guidelines:
 4. Accuracy: Ensure the expected answer is correct and complete.
 5. Evaluation-Friendly: The expected answer should be easy to evaluate automatically.
 6. Difficulty: Ensure that the rewritten question and answers maintain the same level of difficulty.
+
+Errors:
+You will be given multiple chances to answer if the system detects errors in your response.
+Errors accumulated so far: {errors}
 """

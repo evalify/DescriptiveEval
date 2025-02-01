@@ -42,7 +42,7 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
 
     for attempt in range(MAX_RETRIES):
         try:
-            guidelines = await generate_guidelines(llm, question, expected_answer, total_score)
+            guidelines = await generate_guidelines(llm, question, expected_answer, total_score, errors)
             if guidelines['guidelines'].startswith(("Error:", "Error processing response:")):
                 error_msg = guidelines['guidelines']
                 logger.warning(
@@ -55,7 +55,7 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
             logger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}")
             errors.append(error_msg)
 
-    if guidelines is None:
+    if guidelines is None or guidelines.get("status", "403") == "403":
         error_details = "\n".join(errors)
         raise LLMEvaluationError(
             f"Failed to generate guidelines after {MAX_RETRIES} attempts.\nErrors encountered:\n{error_details}")

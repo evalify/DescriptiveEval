@@ -122,7 +122,7 @@ async def score(llm, student_ans:str, expected_ans:str, total_score:float, quest
         }
 
 
-async def generate_guidelines(llm, question: str, expected_ans: str, total_score: int = 5) -> dict:
+async def generate_guidelines(llm, question: str, expected_ans: str, total_score: int = 5, errors = None) -> dict:
     """
     Generate evaluation guidelines and criteria for a given question and expected answer.
 
@@ -133,7 +133,7 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
     """
     if not question or not expected_ans:
         return {
-            "status": 400,
+            "status": 403,
             "guidelines": "Error: Provide a question and expected answer to generate evaluation rubric/guidelines",
             "error": "Missing required parameters"
         }
@@ -146,7 +146,7 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
     format_instructions = guidelines_parser.get_format_instructions()
 
     prompt_template = PromptTemplate(
-        input_variables=['question', 'expected_ans', 'score'],
+        input_variables=['question', 'expected_ans', 'score', 'errors'],
         partial_variables={"format_instructions": format_instructions},
         template=guidelines_template
     )
@@ -154,7 +154,8 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
     _input = prompt_template.format(
         question=question,
         expected_ans=expected_ans,
-        score=total_score
+        score=total_score,
+        errors=errors
     )
 
     try:
