@@ -49,7 +49,7 @@ async def score(llm, student_ans:str, expected_ans:str, total_score:float, quest
     :param question: The question (optional)
     :param guidelines: The evaluation guidelines and criteria (optional)
     """
-    if not expected_ans or expected_ans.strip() == "" or total_score < 1: #TODO: Use better error handling
+    if not expected_ans or expected_ans.strip() == "" or total_score <= 0: #TODO: Use better error handling
         return {
             "score": 0.0,
             "reason": f"Error: Invalid input parameters: expected_ans='{expected_ans}', total_score='{total_score}'",
@@ -106,6 +106,7 @@ async def score(llm, student_ans:str, expected_ans:str, total_score:float, quest
             response = str(response)
 
         parsed_response = output_parser.parse(response)
+        assert float(parsed_response.get("score", 0.0)) <= total_score, "Error: Score exceeds total score"
         return {
             "rubric": str(parsed_response.get("rubric", "No rubric available")),
             "breakdown": str(parsed_response.get("breakdown", "No breakdown available")),
@@ -289,6 +290,7 @@ async def score_fill_in_blank(llm, student_ans: str, expected_ans:str, total_sco
             response = str(response)
 
         parsed_response = output_parser.parse(response)
+        assert float(parsed_response.get("score", 0.0)) <= total_score, "Error: Score exceeds total score"
         return {
             "score": float(parsed_response.get("score", 0.0)), 
             "reason": str(parsed_response.get("reason", "No reason provided"))

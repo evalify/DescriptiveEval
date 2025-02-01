@@ -29,6 +29,7 @@ Expected Answer:
 {expected_ans}
 
 Total Score to evaluate for: {total_score}
+The score you allocate should not exceed this total score.
 '''
 
 fill_in_the_blank_template = '''
@@ -63,6 +64,7 @@ Student's Answer:
 
 
 Total Score to evaluate for: {total_score}
+The score you allocate should not exceed this total score.
 '''
 
 guidelines_template = """
@@ -80,6 +82,7 @@ Define the scoring approach for each criterion.
 
 To be clear, you need to output json in type {{'guidelines': 'insert guidelines here'}}.
 All criteria should be in this str and in proper markdown format.
+The sum of all criteria scores should be equal to the total score.
 """
 
 qa_enhancement_template = """
