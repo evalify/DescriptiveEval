@@ -212,7 +212,8 @@ async def validate_quiz_setup(quiz_id: str, questions: List[dict], responses: Li
 
 
 async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db,
-                                       redis_client: Redis, save_to_file=True, llm=None, override_evaluated=False):
+                                       redis_client: Redis, save_to_file: bool = True, llm=None,
+                                       override_evaluated:bool=False, types_to_evaluate:bool=None):
     """
     Evaluate all responses for a quiz with rubric caching and parallel processing.
     
@@ -225,6 +226,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         save_to_file (bool): Whether to save results to files
         llm: Optional LLM instance to use for evaluation
         override_evaluated (bool): Whether to re-evaluate already evaluated responses (isEvaluated='EVALUATED')
+        types_to_evaluate (dict): List of question types to evaluate (MCQ, DESCRIPTIVE, CODING, TRUE_FALSE, FILL_IN_BLANK)
         
     Raises:
         NoQuestionsError: If no questions are found for the quiz
@@ -234,7 +236,16 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         TotalScoreError: If there are inconsistencies in total scores
         DatabaseConnectionError: If database operations fail
         EvaluationError: For other evaluation-related errors
+        ResponseQuestionMismatchError: If response question IDs is not a subset of quiz questions
     """
+    if not types_to_evaluate:
+        types_to_evaluate = {
+            'MCQ': True,
+            'DESCRIPTIVE': True,
+            'CODING': True,
+            'TRUE_FALSE': True,
+            'FILL_IN_BLANK': True
+        }
     try:
         # Get quiz data with better error handling
         try:
@@ -281,6 +292,18 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         time_taken = None
         with logging_redirect_tqdm(loggers=[logger]):
             progress_bar = tqdm(quiz_responses, desc="Evaluating responses", unit="response", dynamic_ncols=True)
+
+            save_quiz_data(
+                {
+                    'status': 'EVALUATING',
+                    'error': None,
+                    'time_taken': None,
+                    'timestamp': str(datetime.now().isoformat()),
+                    'questions_count_by_type': question_count_by_type,
+                    'selective evaluation': types_to_evaluate
+                },
+                quiz_id, 'metadata')
+
             for quiz_result in progress_bar:
                 time_taken = progress_bar.format_dict['elapsed']
                 if quiz_result.get("isEvaluated") == 'EVALUATED':
@@ -295,9 +318,15 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 invalid_questions = response_question_ids - valid_question_ids
                 if invalid_questions:
                     raise ResponseQuestionMismatchError(quiz_id, invalid_questions)
-                
+
                 for question in questions:
                     qid = str(question["_id"])
+                    question_type = question.get("type", "").upper()
+                    
+                    # Skip question if its type is not in types_to_evaluate
+                    if types_to_evaluate and not types_to_evaluate.get(question_type, types_to_evaluate.get(question_type.lower(), True)):
+                        logger.info(f"Skipping evaluation for question {qid} of type {question_type} as per types_to_evaluate")
+                        continue
 
                     if not quiz_result["responses"] and qid not in quiz_result["responses"]:
                         continue
@@ -321,8 +350,6 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                             f"Question {qid} is missing required 'mark'/'marks' attribute.\n"
                             f"Question data: {json.dumps(question, indent=2)}"
                         )
-
-                    
 
                     # Question type specific evaluation
                     try:
@@ -398,7 +425,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                 guidelines=question_guidelines
                                             )
 
-                                            if any(score_res[key].startswith("Error:") for key in    # TODO: Use status codes instead
+                                            if any(score_res[key].startswith("Error:") for key in
+                                                   # TODO: Use status codes instead
                                                    ["breakdown", "rubric"]):
                                                 error_msg = f"LLM returned error response: {score_res}"
                                                 logger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}")
@@ -612,15 +640,16 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             )
 
         save_quiz_data(
-                {
-                    'status': 'FAILED',
-                    'error': str(e),
-                    'time_taken': time_taken,
-                    'timestamp': str(datetime.now().isoformat()),
-                    'questions_count_by_type': question_count_by_type
-                },
-                quiz_id, 'metadata')
-        
+            {
+                'status': 'FAILED',
+                'error': str(e),
+                'time_taken': time_taken,
+                'timestamp': str(datetime.now().isoformat()),
+                'questions_count_by_type': question_count_by_type,
+                'selective evaluation': types_to_evaluate
+            },
+            quiz_id, 'metadata')
+
         raise
 
     else:
@@ -642,17 +671,18 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                     'error': None,
                     'time_taken': time_taken,
                     'timestamp': str(datetime.now().isoformat()),
-                    'questions_count_by_type': question_count_by_type
+                    'questions_count_by_type': question_count_by_type,
+                    'selective evaluation': types_to_evaluate
                 },
                 quiz_id, 'metadata')
 
         except Exception as e:
             logger.error(f"Error in evaluation cleanup for quiz {quiz_id}: {str(e)}", exc_info=True)
             raise EvaluationError(f"Evaluation completed but failed during cleanup: {str(e)}")
-    
+
     finally:
-            if save_to_file:
-                save_quiz_data(quiz_responses, quiz_id, 'responses_evaluated')
+        if save_to_file:
+            save_quiz_data(quiz_responses, quiz_id, 'responses_evaluated')
 
     return quiz_responses
 

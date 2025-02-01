@@ -50,7 +50,7 @@ async def handle_evaluation(job_id: str, func):
             "details": f"An unexpected error occurred: {str(e)}"
         }
 
-async def evaluation_job(quiz_id: str, model_provider, model_name, model_api_key, override_evaluated=False):
+async def evaluation_job(quiz_id: str, model_provider, model_name, model_api_key, override_evaluated=False, types_to_evaluate=None):
     """Execute the evaluation job for the given quiz ID."""
     job_id = f"eval_{quiz_id}_{model_name}"
     logger.info(f"Starting evaluation job {job_id}")
@@ -71,7 +71,8 @@ async def evaluation_job(quiz_id: str, model_provider, model_name, model_api_key
         async def execute_evaluation():
             result = await bulk_evaluate_quiz_responses(
                 quiz_id, pg_cursor, pg_conn, mongo_db, redis_client,
-                save_to_file=True, llm=llm, override_evaluated=override_evaluated
+                save_to_file=True, llm=llm, override_evaluated=override_evaluated,
+                types_to_evaluate=types_to_evaluate
             )
             return {"status": "success", "message": "Evaluation complete", "results": result}
             
