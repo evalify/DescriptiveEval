@@ -31,6 +31,7 @@
 - [ ] Add model selection support
 - [ ] Add API for retrieving available models (Hard-Coded but validated from list of available models in ollama)
 - [ ] Add Queue Management for Evaluation
+- [ ] How to stop duplicate quizId running on two workers when two requests comes ? and what to do if the worker terminates unexpectedly?
 
 ## Medium Priority
 

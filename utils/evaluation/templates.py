@@ -30,6 +30,10 @@ Expected Answer:
 
 Total Score to evaluate for: {total_score}
 The score you allocate should not exceed this total score.
+
+Errors:
+You will be given multiple chances to answer if the system detects errors in your response.
+Errors accumulated so far: {errors}
 '''
 
 fill_in_the_blank_template = '''

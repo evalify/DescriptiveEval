@@ -451,7 +451,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                 student_ans=student_answer,
                                                 expected_ans=" ".join(question["expectedAnswer"]),
                                                 total_score=question_total_score,
-                                                guidelines=question_guidelines
+                                                guidelines=question_guidelines,
+                                                errors=errors
                                             )
 
                                             if any(score_res[key].startswith("Error:") for key in

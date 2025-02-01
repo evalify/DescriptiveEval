@@ -38,7 +38,7 @@ def get_llm(provider: LLMProvider = LLMProvider.GROQ, api_key=None, model_name=N
         raise ValueError(f"Unsupported LLM provider: {provider}")
 
 
-async def score(llm, student_ans:str, expected_ans:str, total_score:float, question:str=None, guidelines:str=None):
+async def score(llm, student_ans:str, expected_ans:str, total_score:float, question:str=None, guidelines:str=None, errors=None) -> dict:
     """
     Evaluate a student's answer based on the expected answer and guidelines.
 
@@ -81,7 +81,7 @@ async def score(llm, student_ans:str, expected_ans:str, total_score:float, quest
     guidelines_section = f"\nQuestion-specific Guidelines:\n{guidelines}\n" if guidelines else "\n"
 
     prompt_template = PromptTemplate(
-        input_variables=['student_ans', 'expected_ans', 'total_score'],
+        input_variables=['student_ans', 'expected_ans', 'total_score', 'errors'],
         partial_variables={
             "format_instructions": format_instructions,
             "question_context": question_context,
