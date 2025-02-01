@@ -17,9 +17,8 @@ async def evaluate_mcq_with_partial_marking(student_answers: List[str], correct_
         if student_answer in correct_answers:
             correct_count += 1
         else:
-            correct_count -= 1
-    if correct_count <= 0: 
-        return 0
+            return 0
+        
     return total_score * (correct_count / len(correct_answers))
     
 
