@@ -34,7 +34,7 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
                          total_score: int):
     """Get the guidelines for a question from the cache."""
     # Temporary override to use microLLM
-    llm = get_llm(LLMProvider.GROQ, 'llama-3.3-70b-versatile')
+    llm = get_llm(provider=LLMProvider.GROQ, model_name='llama-3.3-70b-versatile')
     cached_guidelines = redis_client.get(question_id + '_guidelines_cache')
     if (cached_guidelines):
         return json.loads(cached_guidelines)
@@ -45,7 +45,7 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
     for attempt in range(MAX_RETRIES):
         try:
             guidelines = await generate_guidelines(llm, question, expected_answer, total_score, errors)
-            if guidelines['guidelines'].startswith(("Error:", "Error processing response:")):
+            if guidelines['guidelines'].startswith(("Error:", "Error processing response:")) or guidelines['status']==403:
                 error_msg = guidelines['guidelines']
                 logger.warning(
                     f"Attempt {attempt + 1}/{MAX_RETRIES}: Failed to generate guidelines for question {question_id}: {error_msg}")
@@ -57,7 +57,7 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
             logger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}")
             errors.append(error_msg)
 
-    if guidelines is None or guidelines.get("status", "403") == "403":
+    if guidelines is None or int(guidelines.get("status", 403)) == 403:
         error_details = "\n".join(errors)
         raise LLMEvaluationError(
             f"Failed to generate guidelines after {MAX_RETRIES} attempts.\nErrors encountered:\n{error_details}")

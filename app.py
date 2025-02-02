@@ -28,7 +28,7 @@ logger.info(f"Initialized {len(worker_processes)} worker processes")
 
 # Store current provider in app state
 app.state.current_provider = LLMProvider.OLLAMA
-app.state.current_model_name = "deepseek-r1:32b"
+app.state.current_model_name = "deepseek-r1:70b"
 app.state.current_api_key = None
 
 app.state.current_micro_llm_provider = LLMProvider.GROQ
