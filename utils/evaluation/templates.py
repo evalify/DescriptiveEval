@@ -33,6 +33,8 @@ The score you allocate should not exceed this total score.
 
 Errors:
 You will be given multiple chances to answer if the system detects errors in your response.
+Your output should contain a json object marked within ```json ... ``` containing the above mentioned fields.
+
 Errors accumulated so far: {errors}
 '''
 
@@ -69,6 +71,8 @@ Student's Answer:
 
 Total Score to evaluate for: {total_score}
 The score you allocate should not exceed this total score.
+
+Your output should contain a json object marked within ```json ... ``` containing the above mentioned fields.
 '''
 
 guidelines_template = """
@@ -110,5 +114,7 @@ Guidelines:
 
 Errors:
 You will be given multiple chances to answer if the system detects errors in your response.
+Your output should contain a json object marked within ```json ... ``` containing the above mentioned fields.
+
 Errors accumulated so far: {errors}
 """

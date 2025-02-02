@@ -33,6 +33,8 @@ MAX_RETRIES = int(os.getenv('MAX_RETRIES', 10))  # Maximum number of retries for
 async def get_guidelines(redis_client: Redis, llm, question_id: str, question: str, expected_answer: str,
                          total_score: int):
     """Get the guidelines for a question from the cache."""
+    # Temporary override to use microLLM
+    llm = get_llm(LLMProvider.GROQ, 'llama-3.3-70b-versatile')
     cached_guidelines = redis_client.get(question_id + '_guidelines_cache')
     if (cached_guidelines):
         return json.loads(cached_guidelines)
@@ -60,7 +62,7 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
         raise LLMEvaluationError(
             f"Failed to generate guidelines after {MAX_RETRIES} attempts.\nErrors encountered:\n{error_details}")
 
-    redis_client.set(question_id + '_guidelines_cache', json.dumps(guidelines), ex=CACHE_EX)
+    redis_client.set(question_id + '_guidelines_cache', json.dumps(guidelines), ex=86400)
     logger.info(f"Successfully generated and cached guidelines for question {question_id}")
     return guidelines
 
@@ -452,7 +454,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                 expected_ans=" ".join(question["expectedAnswer"]),
                                                 total_score=question_total_score,
                                                 guidelines=question_guidelines,
-                                                errors=errors
+                                                errors=errors if attempt < 5 else errors+[f"Warning: Attempt remaining {MAX_RETRIES-attempt-1}"]
                                             )
 
                                             if any(score_res[key].startswith("Error:") for key in
@@ -724,7 +726,7 @@ if __name__ == "__main__":
     my_mongo_db = get_mongo_client()
     my_redis_client = get_redis_client()
 
-    my_quiz_id = "cm64n3edl0006xyrxnp4llbe4"
+    my_quiz_id = "cm6fzxb3h01bbxy8pp7330wz9"
     # Evaluate quiz responses
     asyncio.run(bulk_evaluate_quiz_responses(
         quiz_id=my_quiz_id,
