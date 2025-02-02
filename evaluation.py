@@ -462,6 +462,10 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                    ["breakdown", "rubric"]):
                                                 error_msg = f"LLM returned error response: {score_res}"
                                                 logger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}")
+                                                logger.warning(f"Studentid {quiz_result['studentId']}")
+                                                logger.warning(f"Quizid {quiz_result['quizId']}")
+                                                logger.warning(f"Questionid {qid}")
+                                                logger.warning(f"Student Answer: {student_answer}")
                                                 errors.append(error_msg)
 
                                                 if not llm:

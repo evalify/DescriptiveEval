@@ -98,6 +98,7 @@ async def score(llm, student_ans:str, expected_ans:str, total_score:float, quest
         errors=errors
     )
 
+    response = None
     try:
         response = await llm.ainvoke(_input)
         #print(response)
@@ -115,6 +116,9 @@ async def score(llm, student_ans:str, expected_ans:str, total_score:float, quest
             "reason": str(parsed_response.get("reason", "No reason provided"))
         }
     except Exception as e:
+        with open("logs/score_error.log", "a") as f:
+            f.write(f"Error: {str(e)}\n")
+            f.write(f"Response: {response}\n\n-----------------\n\n")
         return {
             "rubric": "Error: Could not generate rubric",
             "breakdown": "Error: Could not generate breakdown",
