@@ -12,3 +12,5 @@ rq
 psutil
 colorlog
 deprecated
+uvicorn
+pytest-asyncio

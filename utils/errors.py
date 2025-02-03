@@ -99,3 +99,43 @@ class ResponseQuestionMismatchError(EvaluationError):
             "- Questions were removed from quiz after responses were submitted\n"
             "- Database synchronization issues between questions and responses"
         )
+
+class InvalidProviderError(EvaluationError):
+    """Raised when an invalid LLM provider is specified"""
+    def __init__(self, provider: str):
+        super().__init__(
+            f"Invalid LLM provider specified: {provider}.\n"
+            "Supported providers are: 'ollama', 'groq'."
+        )
+
+class InvalidInputError(EvaluationError):
+    """Raised when invalid input parameters are provided"""
+    def __init__(self, parameter: str, value: any):
+        super().__init__(
+            f"Invalid input parameter: {parameter} with value: {value}.\n"
+            "Please provide valid input parameters."
+        )
+
+class EmptyAnswerError(EvaluationError):
+    """Raised when the student's answer is empty or missing"""
+    def __init__(self):
+        super().__init__(
+            "Student answer is empty or missing.\n"
+            "Please provide a valid answer."
+        )
+
+class InvalidQuizIDError(EvaluationError):
+    """Raised when an invalid quiz ID is provided"""
+    def __init__(self, quiz_id: str):
+        super().__init__(
+            f"Invalid quiz ID provided: {quiz_id}.\n"
+            "Please provide a valid quiz ID."
+        )
+
+class EmptyQuizError(EvaluationError):
+    """Raised when the quiz is empty"""
+    def __init__(self):
+        super().__init__(
+            "The quiz is empty.\n"
+            "Please provide a quiz with questions and responses."
+        )
