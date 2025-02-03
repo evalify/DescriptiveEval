@@ -12,8 +12,9 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from rq import Queue, Worker
 
-from evaluation import bulk_evaluate_quiz_responses
+from evaluation import bulk_evaluate_quiz_responses, get_quiz_responses, get_all_questions
 from model import LLMProvider, get_llm, score, generate_guidelines, enhance_question_and_answer
+from utils.quiz.quiz_report import generate_quiz_report, save_quiz_report
 from utils.database import get_postgres_cursor, get_mongo_client, get_redis_client
 from utils.logger import logger
 from utils.redisQueue import job as rq_job
@@ -279,6 +280,22 @@ async def evaluate_bulk_queue(
         logger.error(f"[{trace_id}] Failed to queue evaluation", exc_info=True)
         raise
 
+@app.post("/regenerate-quiz-report/{quiz_id}")
+async def regenerate_quiz_report(quiz_id: str):
+    postgres_cursor, postgres_conn = get_postgres_cursor()
+    mongo_db = get_mongo_client()
+    redis_client = get_redis_client()
+    logger.info(f"Regenerating quiz report for quiz_id: {quiz_id}")
+    try:
+        response = get_quiz_responses(postgres_cursor, redis_client, quiz_id)
+        questions = get_all_questions(mongo_db, redis_client, quiz_id)
+        report = await generate_quiz_report(quiz_id, response, questions)
+        save_quiz_report(quiz_id, report, postgres_cursor, postgres_conn, save_to_file=True)
+        logger.info(f"Quiz report regenerated successfully for quiz_id: {quiz_id}")
+        return {"message": "Quiz report regenerated successfully"}
+    finally:
+        postgres_cursor.close()
+        postgres_conn.close()
 
 @app.get("/workers/status")
 async def get_workers_status():

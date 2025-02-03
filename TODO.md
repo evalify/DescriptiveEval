@@ -32,6 +32,8 @@
 - [ ] Add API for retrieving available models (Hard-Coded but validated from list of available models in ollama)
 - [ ] Add Queue Management for Evaluation
 - [ ] How to stop duplicate quizId running on two workers when two requests comes ? and what to do if the worker terminates unexpectedly?
+- [ ] Can you add more logger calls whereever necessary? I want to have more information to debug. Can you improve quiz wise logging too?
+- [ ] Is it possible to implement quiz wise logging? So I can clearly see what's happening in each quiz's evaluation seperately? How about writing it in a file in quizId/ ?
 
 ## Medium Priority
 

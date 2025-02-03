@@ -62,7 +62,7 @@ async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]],
     question_stats = []
     for question in questions:
         question_id = question['_id']
-        correct = sum(1 for result in quiz_results if result['responses'].get(question_id,{}).get('score') == question['mark'])
+        correct = sum(1 for result in quiz_results if float(result['responses'].get(question_id,{}).get('score')) >= 0.6 * float(question['mark']))
         incorrect = len(quiz_results) - correct
         total_marks_obtained = sum(result['responses'].get(question_id,{}).get('score', 0) for result in quiz_results)
         question_stats.append({
@@ -81,6 +81,8 @@ async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]],
         'average': sum(1 for score in normalized_scores if 40 <= score <= 59),
         'poor': sum(1 for score in normalized_scores if 0 <= score <= 39)
     }
+
+    logger.info(f"Generated quiz report for quiz {quiz_id}")
 
     return {
         'quizId': quiz_id,

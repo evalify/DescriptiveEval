@@ -33,7 +33,7 @@ MAX_RETRIES = int(os.getenv('MAX_RETRIES', 10))  # Maximum number of retries for
 async def get_guidelines(redis_client: Redis, llm, question_id: str, question: str, expected_answer: str,
                          total_score: int):
     """Get the guidelines for a question from the cache."""
-    # Temporary override to use microLLM
+    # FIXME: Temporary override to use microLLM
     llm = get_llm(provider=LLMProvider.GROQ, model_name='llama-3.3-70b-versatile')
     cached_guidelines = redis_client.get(question_id + '_guidelines_cache')
     if (cached_guidelines):
@@ -59,6 +59,9 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
 
     if guidelines is None or int(guidelines.get("status", 403)) == 403:
         error_details = "\n".join(errors)
+        logger.error(f"Failed to generate guidelines for question {question_id} after {MAX_RETRIES} attempts.\n"
+                        f"Errors encountered:\n{error_details}\n"
+                        f"Guidelines response: {guidelines if guidelines else 'None'}")
         raise LLMEvaluationError(
             f"Failed to generate guidelines after {MAX_RETRIES} attempts.\nErrors encountered:\n{error_details}")
 
@@ -276,6 +279,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             questions = get_all_questions(mongo_db=mongo_db, redis_client=redis_client, quiz_id=quiz_id,
                                           save_to_file=save_to_file)
         except Exception as e:
+            logger.error(f"Failed to fetch quiz data for quiz {quiz_id}: {str(e)}")
             raise DatabaseConnectionError(f"Failed to fetch quiz data: {str(e)}")
 
         # Validate quiz setup
@@ -291,7 +295,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             )
 
         negative_marking = evaluation_settings.get("negativeMark", False)
-        mcq_partial_marking = evaluation_settings.get("mcqPartialMark", False)
+        mcq_partial_marking = evaluation_settings.get("mcqPartialMark", True)
 
         logger.info(f"Evaluation Settings for quiz {quiz_id}:\n")
         logger.info(f"Negative Marking: {negative_marking}")
@@ -317,7 +321,10 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             question_count_by_type[q_type] = question_count_by_type.get(q_type, 0) + 1
         time_taken = None
         with logging_redirect_tqdm(loggers=[logger]):
-            progress_bar = tqdm(quiz_responses, desc="Evaluating responses", unit="response", dynamic_ncols=True)
+            progress_bar = tqdm(quiz_responses, desc=f"Evaluating {quiz_id}", unit="response", dynamic_ncols=True)
+            logger.info(f"Starting evaluation for quiz {quiz_id}")
+            logger.info(f"Questions count by type: {question_count_by_type}")
+            logger.info(f"Selective evaluation: {types_to_evaluate}")
 
             save_quiz_data(
                 {
