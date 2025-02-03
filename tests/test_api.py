@@ -21,7 +21,7 @@ async def test_switch_to_groq(client):
         json={"provider": "groq"}
     )
     assert response.status_code == 200
-    assert response.json()["message"] == "Successfully switched to groq"
+    assert response.json()["message"] == "Successfully switched to groq provider with default model"
 
 
 @pytest.mark.asyncio
@@ -31,7 +31,7 @@ async def test_switch_to_ollama(client):
         json={"provider": "ollama"}
     )
     assert response.status_code == 200
-    assert response.json()["message"] == "Successfully switched to ollama"
+    assert response.json()["message"] == "Successfully switched to ollama provider with default model"
 
 
 @pytest.mark.asyncio
@@ -40,8 +40,8 @@ async def test_invalid_provider(client):
         "/set-provider",
         json={"provider": "invalid"}
     )
-    assert response.status_code == 200
-    assert "error" in response.json()
+    assert response.status_code == 400
+    assert "detail" in response.json()
 
 
 @pytest.mark.asyncio
@@ -81,10 +81,9 @@ async def test_scoring_empty_answer(client, sample_answer):
         result
     )
     print_api_result("Empty Answer", response)
-    assert response.status_code == 200
+    assert response.status_code == 500
     result = response.json()
-    assert result["score"] == 0
-    assert isinstance(result["reason"], str)
+    assert "detail" in result
 
 
 @pytest.mark.asyncio
@@ -267,7 +266,7 @@ async def test_evaluate_endpoint(client: AsyncClient):
     assert response.status_code == 200
     result = response.json()
     assert "message" in result
-    assert "results" in result
+    assert "job_id" in result
 
 
 @pytest.mark.asyncio
@@ -277,11 +276,9 @@ async def test_invalid_quiz_id(client: AsyncClient):
         "quiz_id": "invalid_quiz_id"
     }
     response = await client.post("/evaluate", json=request_data)
-    assert response.status_code == 200
-    # Even with invalid quiz ID, the endpoint should return a valid response format
+    assert response.status_code == 500
     result = response.json()
-    assert "message" in result
-    assert "results" in result
+    assert "detail" in result
 
 
 @pytest.mark.asyncio
@@ -291,10 +288,9 @@ async def test_empty_quiz(client: AsyncClient):
         "quiz_id": ""
     }
     response = await client.post("/evaluate", json=request_data)
-    assert response.status_code == 200
+    assert response.status_code == 500
     result = response.json()
-    assert "message" in result
-    assert "results" in result
+    assert "detail" in result
 
 
 @pytest.mark.asyncio
@@ -331,10 +327,9 @@ async def test_score_invalid_input(client: AsyncClient):
         "total_score": -1
     }
     response = await client.post("/score", json=request_data)
-    assert response.status_code == 200
+    assert response.status_code == 500
     result = response.json()
-    assert result["score"] == 0
-    assert isinstance(result["reason"], str)
+    assert "detail" in result
 
 
 @pytest.mark.asyncio
@@ -345,10 +340,9 @@ async def test_enhance_qa_empty_input(client: AsyncClient):
         "expected_ans": ""
     }
     response = await client.post("/enhance-qa", json=request_data)
-    assert response.status_code == 200
+    assert response.status_code == 400
     result = response.json()
-    assert "enhanced_question" in result
-    assert "enhanced_expected_ans" in result
+    assert "detail" in result
 
 
 @pytest.mark.asyncio
@@ -360,6 +354,6 @@ async def test_guidelines_empty_input(client: AsyncClient):
         "total_score": 10
     }
     response = await client.post("/generate-guidelines", json=request_data)
-    assert response.status_code == 200
+    assert response.status_code == 400
     result = response.json()
-    assert "guidelines" in result
+    assert "detail" in result

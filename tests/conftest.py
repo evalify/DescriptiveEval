@@ -29,7 +29,7 @@ import subprocess
 @pytest.fixture(scope="session", autouse=True)
 def start_server():
     # Start the FastAPI server
-    process = subprocess.Popen(["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "4040"])
+    process = subprocess.Popen(["python","-m","uvicorn", "app:app", "--host", "0.0.0.0", "--port", "4040"])
     import requests
     import time
 

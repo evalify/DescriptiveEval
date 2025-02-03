@@ -8,9 +8,12 @@ from evaluation import (
     get_quiz_responses,
     get_all_questions,
     bulk_evaluate_quiz_responses,
-    CACHE_EX
+    CACHE_EX,
+    set_quiz_response,
+    validate_quiz_setup
 )
 from model import get_llm, LLMProvider
+from utils.errors import NoQuestionsError, NoResponsesError, InvalidQuestionError, ResponseQuestionMismatchError
 
 @pytest.fixture
 def redis_mock():
@@ -41,7 +44,7 @@ def mongo_db_mock():
         'quizId': 'quiz1',
         'question': 'Test question?',
         'type': 'DESCRIPTIVE',
-        'explanation': ['Expected answer'],
+        'expectedAnswer': ['Expected answer'],
         'marks': 10,
         'guidelines': 'Test guidelines'
     }]
@@ -172,3 +175,71 @@ async def test_guidelines_error_handling(redis_mock):
         redis_mock, llm, "q1", "question", "answer", 10
     )
     assert "Error processing response" in result["guidelines"]
+
+@pytest.mark.asyncio
+async def test_set_quiz_response(pg_cursor_mock):
+    """Test setting quiz response in the database"""
+    pg_conn_mock = MagicMock()
+    response_data = {
+        "id": "1",
+        "responses": {"q1": {"score": 5}},
+        "score": 5,
+        "totalScore": 10
+    }
+    
+    await set_quiz_response(pg_cursor_mock, pg_conn_mock, response_data)
+    
+    # Verify database update
+    pg_cursor_mock.execute.assert_called_once()
+    pg_conn_mock.commit.assert_called_once()
+
+@pytest.mark.asyncio
+async def test_validate_quiz_setup():
+    """Test validation of quiz setup"""
+    quiz_id = "test_quiz1"
+    questions = [{"_id": "q1", "type": "MCQ", "mark": 5, "answer": "A"}]
+    responses = [{"id": "1", "responses": {"q1": {"student_answer": "A"}}}]
+    
+    await validate_quiz_setup(quiz_id, questions, responses)
+    
+    # No exception should be raised for valid setup
+
+@pytest.mark.asyncio
+async def test_validate_quiz_setup_no_questions():
+    """Test validation of quiz setup with no questions"""
+    quiz_id = "test_quiz1"
+    questions = []
+    responses = [{"id": "1", "responses": {"q1": {"student_answer": "A"}}}]
+    
+    with pytest.raises(NoQuestionsError):
+        await validate_quiz_setup(quiz_id, questions, responses)
+
+@pytest.mark.asyncio
+async def test_validate_quiz_setup_no_responses():
+    """Test validation of quiz setup with no responses"""
+    quiz_id = "test_quiz1"
+    questions = [{"_id": "q1", "type": "MCQ", "mark": 5, "answer": "A"}]
+    responses = []
+    
+    with pytest.raises(NoResponsesError):
+        await validate_quiz_setup(quiz_id, questions, responses)
+
+@pytest.mark.asyncio
+async def test_validate_quiz_setup_invalid_question():
+    """Test validation of quiz setup with invalid question"""
+    quiz_id = "test_quiz1"
+    questions = [{"_id": "q1", "type": "MCQ"}]  # Missing 'mark' and 'answer'
+    responses = [{"id": "1", "responses": {"q1": {"student_answer": "A"}}}]
+    
+    with pytest.raises(InvalidQuestionError):
+        await validate_quiz_setup(quiz_id, questions, responses)
+
+@pytest.mark.asyncio
+async def test_validate_quiz_setup_response_question_mismatch():
+    """Test validation of quiz setup with response question mismatch"""
+    quiz_id = "test_quiz1"
+    questions = [{"_id": "q1", "type": "MCQ", "mark": 5, "answer": "A"}]
+    responses = [{"id": "1", "responses": {"q2": {"student_answer": "A"}}}]  # Question ID 'q2' not in questions
+    
+    with pytest.raises(ResponseQuestionMismatchError):
+        await validate_quiz_setup(quiz_id, questions, responses)

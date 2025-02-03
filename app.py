@@ -19,6 +19,7 @@ from utils.database import get_postgres_cursor, get_mongo_client, get_redis_clie
 from utils.logger import logger
 from utils.redisQueue import job as rq_job
 from utils.redisQueue.wakeup_workers import spawn_workers, check_workers
+from utils.errors import InvalidProviderError, InvalidInputError, EmptyAnswerError, InvalidQuizIDError
 
 app = FastAPI()
 logger.info("Initializing FastAPI application")
@@ -164,9 +165,15 @@ async def get_response(
         )
         logger.info(f"[{trace_id}] Scoring complete. Score: {result.get('score')}")
         return result
+    except InvalidInputError as e:
+        logger.error(f"[{trace_id}] Invalid input error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except EmptyAnswerError as e:
+        logger.error(f"[{trace_id}] Empty answer error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"[{trace_id}] Error processing scoring request", exc_info=True)
-        raise
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/generate-guidelines")
@@ -186,9 +193,12 @@ async def generate_guidelines_api(
         )
         logger.info(f"[{trace_id}] Guidelines generated successfully")
         return guidelines_result
+    except InvalidInputError as e:
+        logger.error(f"[{trace_id}] Invalid input error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"[{trace_id}] Error generating guidelines", exc_info=True)
-        raise
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/enhance-qa")
@@ -196,12 +206,19 @@ async def enhance_qa(
         request: QAEnhancementRequest,
         llm=Depends(get_micro_llm_dependency)
 ):
-    result = await enhance_question_and_answer(
-        llm,
-        question=request.question,
-        expected_ans=request.expected_ans
-    )
-    return result
+    try:
+        result = await enhance_question_and_answer(
+            llm,
+            question=request.question,
+            expected_ans=request.expected_ans
+        )
+        return result
+    except InvalidInputError as e:
+        logger.error(f"Invalid input error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error enhancing question and answer", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @deprecated.deprecated(reason="Use /evaluate instead")
@@ -224,6 +241,12 @@ async def evaluate_bulk(
             llm=llm
         )
         return {"message": "Evaluation complete", "results": results}  # TODO: Give more detailed response
+    except InvalidQuizIDError as e:
+        logger.error(f"Invalid quiz ID error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error during evaluation", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         postgres_cursor.close()
         postgres_conn.close()
@@ -280,7 +303,7 @@ async def evaluate_bulk_queue(
         return {"message": "Evaluation queued", "job_id": job.id}
     except Exception as e:
         logger.error(f"[{trace_id}] Failed to queue evaluation", exc_info=True)
-        raise
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.post("/regenerate-quiz-report/{quiz_id}")
 async def regenerate_quiz_report(quiz_id: str):
@@ -295,6 +318,12 @@ async def regenerate_quiz_report(quiz_id: str):
         save_quiz_report(quiz_id, report, postgres_cursor, postgres_conn, save_to_file=True)
         logger.info(f"Quiz report regenerated successfully for quiz_id: {quiz_id}")
         return {"message": "Quiz report regenerated successfully"}
+    except InvalidQuizIDError as e:
+        logger.error(f"Invalid quiz ID error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        logger.error(f"Error regenerating quiz report", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         postgres_cursor.close()
         postgres_conn.close()
@@ -311,7 +340,7 @@ async def get_workers_status():
         return status
     except Exception as e:
         logger.error(f"[{trace_id}] Error checking worker status", exc_info=True)
-        raise
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 
 @app.post("/workers/kill/{pid}")

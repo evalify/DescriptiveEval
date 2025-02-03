@@ -1,6 +1,6 @@
 import json
 import pytest
-from model import get_llm, LLMProvider, score, generate_guidelines, enhance_question_and_answer
+from model import get_llm, LLMProvider, score, generate_guidelines, enhance_question_and_answer, score_fill_in_blank
 from utils.logger import log_evaluation
 
 DEFAULT_PROVIDER = LLMProvider.GROQ
@@ -142,7 +142,8 @@ async def test_enhance_question_and_answer():
     llm = get_llm(DEFAULT_PROVIDER)
     params = {
         "question": "Explain the process of photosynthesis.",
-        "expected_ans": "Photosynthesis is the process where plants convert sunlight into energy."
+        "expected_ans": "Photosynthesis is the process where plants convert sunlight into energy.",
+        "errors": []  # Provide the required `errors` key in the input data
     }
     result = await enhance_question_and_answer(llm=llm, **params)
     assert isinstance(result, dict)
@@ -175,3 +176,65 @@ async def test_edge_cases_score():
     assert isinstance(result["score"], float)
     assert isinstance(result["reason"], str)
     assert 0 <= result["score"] <= 10
+
+@pytest.mark.asyncio
+async def test_score_fill_in_blank():
+    llm = get_llm(DEFAULT_PROVIDER)
+    params = {
+        "question": "The Capital of France is ________.",
+        "student_ans": "Paris",
+        "expected_ans": "Paris",
+        "total_score": 1
+    }
+    result = await score_fill_in_blank(llm=llm, **params)
+    log_evaluation("Score Fill in the Blank", params, result)
+    print_result("Score Fill in the Blank", result)
+    assert isinstance(result["score"], float)
+    assert isinstance(result["reason"], str)
+    assert 0 <= result["score"] <= 1
+
+@pytest.mark.asyncio
+async def test_score_fill_in_blank_incorrect():
+    llm = get_llm(DEFAULT_PROVIDER)
+    params = {
+        "question": "The Capital of France is ________.",
+        "student_ans": "Lyon",
+        "expected_ans": "Paris",
+        "total_score": 1
+    }
+    result = await score_fill_in_blank(llm=llm, **params)
+    log_evaluation("Score Fill in the Blank Incorrect", params, result)
+    print_result("Score Fill in the Blank Incorrect", result)
+    assert isinstance(result["score"], float)
+    assert isinstance(result["reason"], str)
+    assert 0 <= result["score"] <= 1
+
+@pytest.mark.asyncio
+async def test_score_fill_in_blank_empty():
+    llm = get_llm(DEFAULT_PROVIDER)
+    params = {
+        "question": "The Capital of France is ________.",
+        "student_ans": "",
+        "expected_ans": "Paris",
+        "total_score": 1
+    }
+    result = await score_fill_in_blank(llm=llm, **params)
+    log_evaluation("Score Fill in the Blank Empty", params, result)
+    print_result("Score Fill in the Blank Empty", result)
+    assert result["score"] == 0
+    assert isinstance(result["reason"], str)
+
+@pytest.mark.asyncio
+async def test_score_fill_in_blank_invalid():
+    llm = get_llm(DEFAULT_PROVIDER)
+    params = {
+        "question": "The Capital of France is ________.",
+        "student_ans": "Paris",
+        "expected_ans": "",
+        "total_score": 1
+    }
+    result = await score_fill_in_blank(llm=llm, **params)
+    log_evaluation("Score Fill in the Blank Invalid", params, result)
+    print_result("Score Fill in the Blank Invalid", result)
+    assert result["score"] == 0
+    assert isinstance(result["reason"], str)
