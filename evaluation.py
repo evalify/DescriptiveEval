@@ -24,6 +24,7 @@ from utils.logger import logger, QuizLogger
 from utils.misc import DateTimeEncoder, remove_html_tags, save_quiz_data
 from utils.quiz.quiz_report import generate_quiz_report, save_quiz_report
 from utils.quiz.quiz_schema import QuizResponseSchema
+from utils.quiz.evaluation_logger import EvaluationLogger
 
 load_dotenv()
 CACHE_EX = int(os.getenv('CACHE_EX', 3600))  # Cache expiry time in seconds
@@ -95,7 +96,7 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
   }
     },...]
 
-    Where, question_id can be matched with the questions retrived from mongo
+    Where, question_id can be matched with the questions retrieved from mongo
 
     :param cursor: PostgresSQL cursor for database operations
     :param redis_client: Redis client for caching
@@ -258,6 +259,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     """
     # Initialize quiz-specific logger
     qlogger = QuizLogger(quiz_id)
+    eval_logger = EvaluationLogger(quiz_id)
     qlogger.info(f"Starting evaluation for quiz {quiz_id}")
     qlogger.info(f"Evaluation parameters: override_evaluated={override_evaluated}, types_to_evaluate={types_to_evaluate}")
 
@@ -399,6 +401,13 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
                     # Question type specific evaluation
                     try:
+                        # Track evaluation metadata
+                        evaluation_metadata = {
+                            "evaluatedAt": datetime.now().isoformat(),
+                            "questionType": question_type,
+                            "evaluationAttempts": 0  # Will be updated for LLM evaluations
+                        }
+
                         match question.get("type", "").upper():
                             case "MCQ":
                                 qlogger.debug(f"Evaluating MCQ question {qid}")
@@ -433,6 +442,16 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                         # logger.info(f"Applied negative marking ({neg_score}) for incorrect MCQ answer in {qid}")
                                     else:
                                         QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score', 0)
+
+                                    eval_logger.log_question_evaluation(
+                                        qid, question, quiz_result["studentId"], 
+                                        quiz_result["responses"][qid],
+                                        {
+                                            "score": mcq_score,
+                                            "negative_score": quiz_result["responses"][qid].get("negative_score", 0)
+                                        },
+                                        evaluation_metadata
+                                    )
 
                                 except Exception as e:
                                     qlogger.error(f"MCQ evaluation failed for question {qid}", exc_info=True)
@@ -519,6 +538,17 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                 QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', score_res['reason'])
                                 QuizResponseSchema.set_attribute(quiz_result, qid, 'breakdown', score_res["breakdown"])
 
+                                # Update metadata with LLM attempts
+                                evaluation_metadata["evaluationAttempts"] = attempt + 1
+                                evaluation_metadata["llmProvider"] = current_llm.__class__.__name__
+                                
+                                eval_logger.log_question_evaluation(
+                                    qid, question, quiz_result["studentId"],
+                                    quiz_result["responses"][qid],
+                                    score_res,
+                                    evaluation_metadata
+                                )
+
                             case "CODING":
                                 qlogger.debug(f"Evaluating coding question {qid}")
                                 response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')
@@ -545,6 +575,17 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                     QuizResponseSchema.set_attribute(quiz_result, qid, 'score', coding_score)
                                     if eval_result:  # Add execution result as remarks if available
                                         QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', eval_result)
+
+                                    eval_logger.log_question_evaluation(
+                                        qid, question, quiz_result["studentId"],
+                                        quiz_result["responses"][qid],
+                                        {
+                                            "score": coding_score,
+                                            "remarks": eval_result
+                                        },
+                                        evaluation_metadata
+                                    )
+
                                 except Exception as e:
                                     qlogger.error(f"Coding evaluation failed for question {qid}", exc_info=True)
                                     raise CodingEvaluationError(qid, str(e), len(test_cases))
@@ -575,6 +616,17 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                         # logger.info(f"Applied negative marking ({neg_score}) for incorrect True/False answer in {qid}")
                                     else:
                                         QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score', 0)
+
+                                    eval_logger.log_question_evaluation(
+                                        qid, question, quiz_result["studentId"],
+                                        quiz_result["responses"][qid],
+                                        {
+                                            "score": tf_score,
+                                            "negative_score": quiz_result["responses"][qid].get("negative_score", 0)
+                                        },
+                                        evaluation_metadata
+                                    )
+
                                 except Exception as e:
                                     qlogger.error(f"True/False evaluation failed for question {qid}", exc_info=True)
                                     raise TrueFalseEvaluationError(qid, response[0], correct_answer)
@@ -659,6 +711,17 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                 QuizResponseSchema.set_attribute(quiz_result, qid, 'score', fitb_score["score"])
                                 QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', fitb_score['reason'])
 
+                                # Update metadata with LLM attempts
+                                evaluation_metadata["evaluationAttempts"] = attempt + 1
+                                evaluation_metadata["llmProvider"] = current_llm.__class__.__name__
+                                
+                                eval_logger.log_question_evaluation(
+                                    qid, question, quiz_result["studentId"],
+                                    quiz_result["responses"][qid],
+                                    fitb_score,
+                                    evaluation_metadata
+                                )
+
                             case _:
                                 qlogger.warning(f"Unhandled question type: {question.get('type')!r} for question {qid}")
 
@@ -668,6 +731,13 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                             f"Error: {str(e)}\n"
                             f"Question data: {json.dumps(question, indent=2)}\n"
                             f"Response data: {json.dumps(quiz_result.get('responses', {}).get(qid), indent=2)}"
+                        )
+                        # Log failed evaluation
+                        eval_logger.log_question_evaluation(
+                            qid, question, quiz_result["studentId"],
+                            quiz_result["responses"][qid],
+                            {"error": str(e)},
+                            {"evaluatedAt": datetime.now().isoformat(), "status": "failed"}
                         )
                         raise
 
