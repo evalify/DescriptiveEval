@@ -82,10 +82,8 @@ class QuizLogger:
         self.quiz_handler.setFormatter(logging.Formatter(quiz_format))
         self.logger.addHandler(self.quiz_handler)
         
-        # Set quiz-specific record factory for this logger only
-        self.logger.makeRecord = lambda *args, **kwargs: logging.LogRecord(
-            *args, **{**kwargs, 'extra': {'quiz_id': quiz_id}}
-        )
+        # Use LoggerAdapter instead of overriding makeRecord
+        self.logger = logging.LoggerAdapter(self.logger, {'quiz_id': self.quiz_id})
 
     def debug(self, msg, *args, **kwargs):
         """Log debug message (quiz-specific only)"""
@@ -123,8 +121,9 @@ class QuizLogger:
 
     def __del__(self):
         """Cleanup logging handlers"""
-        self.quiz_handler.close()
-        self.logger.removeHandler(self.quiz_handler)
+        if hasattr(self, 'quiz_handler'):
+            self.quiz_handler.close()
+            self.logger.logger.removeHandler(self.quiz_handler)  # Access underlying logger through LoggerAdapter
 
 def log_evaluation(test_name: str, params: dict, result: dict):
     """Log an evaluation event with structured data"""
