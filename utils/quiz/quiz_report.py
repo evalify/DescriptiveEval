@@ -1,4 +1,4 @@
-""""
+"""
 This module contains functions to generate and save a report for a quiz.
 
 The report includes the following data:
@@ -37,7 +37,7 @@ import asyncio
 import uuid
 import os
 from utils.misc import save_quiz_data
-from utils.logger import logger
+from utils.logger import logger, QuizLogger
 
 async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]], questions: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
@@ -47,25 +47,34 @@ async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]],
     :param questions: List of questions in the quiz
     :return: Quiz report
     """
+    qlogger = QuizLogger(quiz_id)
+    qlogger.debug(f"Starting report generation with {len(quiz_results)} results and {len(questions)} questions")
+    
     scores = [result['score'] for result in quiz_results]
     total_score = set(result['totalScore'] for result in quiz_results)
     if len(total_score) > 1:
-        print(f"Warning: Multiple total scores found for quiz results for {quiz_id=!r}")
+        qlogger.warning(f"Multiple total scores found: {total_score}")
     total_score = total_score.pop()
     if total_score <= 0:
-        raise ValueError("Total score is ", total_score, " for quiz ", quiz_id)
+        msg = f"Invalid total score: {total_score}"
+        qlogger.error(msg)
+        raise ValueError(msg)
+
     avg_score = sum(scores) / len(scores)
     max_score = max(scores)
     min_score = min(scores)
     normalized_scores = [(score / total_score) * 100 for score in scores]
 
+    qlogger.debug(f"Score statistics - Avg: {avg_score:.2f}, Max: {max_score}, Min: {min_score}")
+
     question_stats = []
     for question in questions:
         question_id = question['_id']
-        correct = sum(1 for result in quiz_results if float(result['responses'].get(question_id,{}).get('score')) >= 0.6 * float(question['mark']))
+        correct = sum(1 for result in quiz_results if float(result['responses'].get(question_id, {}).get('score', 0)) >= 0.6 * float(question['mark']))
         incorrect = len(quiz_results) - correct
         total_marks_obtained = sum(result['responses'].get(question_id,{}).get('score', 0) for result in quiz_results)
-        question_stats.append({
+        
+        stats = {
             'questionId': question_id,
             'questionText': question['question'],
             'correct': correct,
@@ -73,7 +82,9 @@ async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]],
             'totalAttempts': correct + incorrect,
             'avgMarks': total_marks_obtained / len(quiz_results),
             'maxMarks': question['mark']
-        })
+        }
+        question_stats.append(stats)
+        qlogger.debug(f"Question {question_id} stats - Correct: {correct}, Incorrect: {incorrect}, Avg marks: {stats['avgMarks']:.2f}")
 
     mark_distribution = {
         'excellent': sum(1 for score in normalized_scores if 80 <= score <= 100),
@@ -82,7 +93,7 @@ async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]],
         'poor': sum(1 for score in normalized_scores if 0 <= score <= 39)
     }
 
-    logger.info(f"Generated quiz report for quiz {quiz_id}")
+    qlogger.info(f"Mark distribution - Excellent: {mark_distribution['excellent']}, Good: {mark_distribution['good']}, Average: {mark_distribution['average']}, Poor: {mark_distribution['poor']}")
 
     return {
         'quizId': quiz_id,
@@ -104,11 +115,14 @@ async def save_quiz_report(quiz_id: str, report: Dict[str, Any], cursor, conn, s
     :param conn: Database connection
     :param save_to_file: Whether to save to a file (default: True)
     """
+    qlogger = QuizLogger(quiz_id)
     retries = 0
     max_retries = int(os.getenv('DB_MAX_RETRIES', 3))
+    
     while retries < max_retries:
         try:
             # Save to database
+            qlogger.debug("Attempting to save report to database")
             await asyncio.to_thread(
                 cursor.execute,
                 """INSERT INTO "QuizReport" (
@@ -139,18 +153,19 @@ async def save_quiz_report(quiz_id: str, report: Dict[str, Any], cursor, conn, s
                 )
             )
             await asyncio.to_thread(conn.commit)
-            logger.info(f"Saved quiz report to database for quiz {quiz_id}")
+            qlogger.info("Quiz report saved to database successfully")
 
             # Save to file if requested
             if save_to_file:
                 save_quiz_data(report, quiz_id, 'report')
+                qlogger.debug("Quiz report saved to file")
             break
 
         except Exception as e:
             retries += 1
             if retries == max_retries:
-                logger.error(f"Failed to save quiz report in db for quiz {quiz_id}: {str(e)}", exc_info=True)
+                qlogger.error(f"Failed to save quiz report after {max_retries} retries: {str(e)}")
                 raise
             wait_time = (2 ** retries)  # Exponential backoff: 2,4,8 seconds
-            logger.warning(f"Retrying database update in {wait_time} seconds... (Attempt {retries}/{max_retries})")
+            qlogger.warning(f"Retrying database update in {wait_time} seconds... (Attempt {retries}/{max_retries})")
             await asyncio.sleep(wait_time)

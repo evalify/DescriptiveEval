@@ -20,7 +20,7 @@ from utils.errors import *
 from utils.evaluation.code_eval import evaluate_coding_question
 from utils.evaluation.static_eval import evaluate_mcq, evaluate_mcq_with_partial_marking, evaluate_true_false, \
     direct_match
-from utils.logger import logger
+from utils.logger import logger, QuizLogger
 from utils.misc import DateTimeEncoder, remove_html_tags, save_quiz_data
 from utils.quiz.quiz_report import generate_quiz_report, save_quiz_report
 from utils.quiz.quiz_schema import QuizResponseSchema
@@ -36,7 +36,7 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
     # FIXME: Temporary override to use microLLM
     llm = get_llm(provider=LLMProvider.GROQ, model_name='llama-3.3-70b-versatile')
     cached_guidelines = redis_client.get(question_id + '_guidelines_cache')
-    if (cached_guidelines):
+    if cached_guidelines:
         return json.loads(cached_guidelines)
 
     guidelines = None
@@ -231,7 +231,7 @@ async def validate_quiz_setup(quiz_id: str, questions: List[dict], responses: Li
 
 async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db,
                                        redis_client: Redis, save_to_file: bool = True, llm=None,
-                                       override_evaluated: bool = False, types_to_evaluate: bool = None):
+                                       override_evaluated: bool = False, types_to_evaluate: Optional[Dict[str, bool]] = None):
     """
     Evaluate all responses for a quiz with rubric caching and parallel processing.
     
@@ -256,6 +256,11 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         EvaluationError: For other evaluation-related errors
         ResponseQuestionMismatchError: If response question IDs is not a subset of quiz questions
     """
+    # Initialize quiz-specific logger
+    qlogger = QuizLogger(quiz_id)
+    qlogger.info(f"Starting evaluation for quiz {quiz_id}")
+    qlogger.info(f"Evaluation parameters: override_evaluated={override_evaluated}, types_to_evaluate={types_to_evaluate}")
+
     if not types_to_evaluate:
         types_to_evaluate = {
             'MCQ': True,
@@ -266,7 +271,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         }
 
     if override_evaluated:
-        # Set isEvaluated to UNEVALUATED for all responses
+        qlogger.info("Resetting evaluation status for all responses")
         pg_cursor.execute(
             """UPDATE "QuizResult" SET "isEvaluated" = 'UNEVALUATED' WHERE "quizId" = %s""",
             (quiz_id,)
@@ -278,8 +283,9 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                 save_to_file=save_to_file)
             questions = get_all_questions(mongo_db=mongo_db, redis_client=redis_client, quiz_id=quiz_id,
                                           save_to_file=save_to_file)
+            qlogger.info(f"Retrieved {len(quiz_responses)} responses and {len(questions)} questions")
         except Exception as e:
-            logger.error(f"Failed to fetch quiz data for quiz {quiz_id}: {str(e)}")
+            qlogger.error(f"Failed to fetch quiz data: {str(e)}")
             raise DatabaseConnectionError(f"Failed to fetch quiz data: {str(e)}")
 
         # Validate quiz setup
@@ -288,7 +294,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         # Get evaluation settings with defaults
         evaluation_settings = get_evaluation_settings(pg_cursor, quiz_id) or {}
         if not evaluation_settings:
-            logger.warning(
+            qlogger.warning(
                 f"No evaluation settings found for quiz {quiz_id}. Using defaults:\n"
                 "- Negative marking: False\n"
                 "- MCQ partial marking: False"
@@ -297,13 +303,13 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         negative_marking = evaluation_settings.get("negativeMark", False)
         mcq_partial_marking = evaluation_settings.get("mcqPartialMark", True)
 
-        logger.info(f"Evaluation Settings for quiz {quiz_id}:\n")
-        logger.info(f"Negative Marking: {negative_marking}")
-        logger.info(f"MCQ Partial Marking: {mcq_partial_marking}")
+        qlogger.info(f"Evaluation Settings for quiz {quiz_id}:\n")
+        qlogger.info(f"Negative Marking: {negative_marking}")
+        qlogger.info(f"MCQ Partial Marking: {mcq_partial_marking}")
 
         # Initialize LLM with API key rotation
         if llm is None:
-            logger.info("No LLM instance provided. Using default Groq API key rotation")
+            qlogger.info("No LLM instance provided. Using default Groq API key rotation")
             keys = [os.getenv(f"GROQ_API_KEY{i if i > 1 else ''}", None) for i in range(1, 6)]
             valid_keys = [key for key in keys if key]
             if not valid_keys:
@@ -312,7 +318,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                     "Please ensure at least one GROQ_API_KEY is set in environment variables."
                 )
             groq_api_keys = itertools.cycle(valid_keys)
-            logger.info(f"Using {len(valid_keys)} API keys in rotation for evaluation")
+            qlogger.info(f"Using {len(valid_keys)} API keys in rotation for evaluation")
 
         # Count questions by type
         question_count_by_type = {}
@@ -322,9 +328,9 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
         time_taken = None
         with logging_redirect_tqdm(loggers=[logger]):
             progress_bar = tqdm(quiz_responses, desc=f"Evaluating {quiz_id}", unit="response", dynamic_ncols=True)
-            logger.info(f"Starting evaluation for quiz {quiz_id}")
-            logger.info(f"Questions count by type: {question_count_by_type}")
-            logger.info(f"Selective evaluation: {types_to_evaluate}")
+            qlogger.info(f"Starting evaluation for quiz {quiz_id}")
+            qlogger.info(f"Questions count by type: {question_count_by_type}")
+            qlogger.info(f"Selective evaluation: {types_to_evaluate}")
 
             save_quiz_data(
                 {
@@ -339,11 +345,12 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
             for quiz_result in progress_bar:
                 time_taken = progress_bar.format_dict['elapsed']
+                qlogger.debug(f"Processing response {quiz_result['id']} for student {quiz_result['studentId']}")
                 if quiz_result.get("isEvaluated") == 'EVALUATED':
                     if not override_evaluated:
-                        logger.info(f"Skipping evaluation for already evaluated quiz response {quiz_result['id']}")
+                        qlogger.info(f"Skipping evaluation for already evaluated quiz response {quiz_result['id']}")
                         continue
-                    logger.info(f"Re-evaluating quiz response {quiz_result['id']}")
+                    qlogger.info(f"Re-evaluating quiz response {quiz_result['id']}")
                 quiz_result["totalScore"] = 0
 
                 response_question_ids = set(quiz_result["responses"])
@@ -357,12 +364,13 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 for question in questions_progress:
                     qid = str(question["_id"])
                     question_type = question.get("type", "").upper()
+                    qlogger.debug(f"Evaluating question {qid} of type {question_type}")
 
                     # Skip question if its type is not in types_to_evaluate
                     if types_to_evaluate and not types_to_evaluate.get(question_type,
                                                                        types_to_evaluate.get(question_type.lower(),
                                                                                              True)):
-                        logger.info(
+                        qlogger.info(
                             f"Skipping evaluation for question {qid} of type {question_type} as per types_to_evaluate")
                         continue
 
@@ -393,9 +401,10 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                     try:
                         match question.get("type", "").upper():
                             case "MCQ":
+                                qlogger.debug(f"Evaluating MCQ question {qid}")
                                 student_answers = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')
                                 if not student_answers:
-                                    logger.warning(f"Empty response for MCQ question {qid}")
+                                    qlogger.warning(f"Empty response for MCQ question {qid}")
                                     QuizResponseSchema.set_attribute(quiz_result, qid, 'score', 0)
                                     QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', 'No answer provided')
                                     continue
@@ -426,10 +435,11 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                         QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score', 0)
 
                                 except Exception as e:
-                                    logger.error(f"MCQ evaluation failed for question {qid}", exc_info=True)
+                                    qlogger.error(f"MCQ evaluation failed for question {qid}", exc_info=True)
                                     raise MCQEvaluationError(qid, student_answers, correct_answers)
 
                             case "DESCRIPTIVE":
+                                qlogger.debug(f"Evaluating descriptive question {qid}")
                                 clean_question = remove_html_tags(question['question']).strip()
                                 student_answer = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
 
@@ -468,11 +478,11 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                    # TODO: Use status codes instead
                                                    ["breakdown", "rubric"]):
                                                 error_msg = f"LLM returned error response: {score_res}"
-                                                logger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}")
-                                                logger.warning(f"Studentid {quiz_result['studentId']}")
-                                                logger.warning(f"Quizid {quiz_result['quizId']}")
-                                                logger.warning(f"Questionid {qid}")
-                                                logger.warning(f"Student Answer: {student_answer}")
+                                                qlogger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}")
+                                                qlogger.warning(f"Studentid {quiz_result['studentId']}")
+                                                qlogger.warning(f"Quizid {quiz_result['quizId']}")
+                                                qlogger.warning(f"Questionid {qid}")
+                                                qlogger.warning(f"Student Answer: {student_answer}")
                                                 errors.append(error_msg)
 
                                                 if not llm:
@@ -486,7 +496,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                             break
                                         except Exception as e:
                                             error_msg = f"Unexpected error during scoring: {str(e)}"
-                                            logger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}")
+                                            qlogger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}")
                                             errors.append(error_msg)
 
                                             if not llm:
@@ -510,9 +520,10 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                 QuizResponseSchema.set_attribute(quiz_result, qid, 'breakdown', score_res["breakdown"])
 
                             case "CODING":
+                                qlogger.debug(f"Evaluating coding question {qid}")
                                 response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')
                                 if not response:
-                                    logger.warning(f"Empty response for coding question {qid}")
+                                    qlogger.warning(f"Empty response for coding question {qid}")
                                     QuizResponseSchema.set_attribute(quiz_result, qid, 'score', 0)
                                     QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', 'No code submitted')
                                     continue
@@ -535,13 +546,14 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                     if eval_result:  # Add execution result as remarks if available
                                         QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', eval_result)
                                 except Exception as e:
-                                    logger.error(f"Coding evaluation failed for question {qid}", exc_info=True)
+                                    qlogger.error(f"Coding evaluation failed for question {qid}", exc_info=True)
                                     raise CodingEvaluationError(qid, str(e), len(test_cases))
 
                             case "TRUE_FALSE":
+                                qlogger.debug(f"Evaluating True/False question {qid}")
                                 response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')
                                 if not response:
-                                    logger.warning(f"Empty response for True/False question {qid}")
+                                    qlogger.warning(f"Empty response for True/False question {qid}")
                                     QuizResponseSchema.set_attribute(quiz_result, qid, 'score', 0)
                                     QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', 'No answer provided')
                                     continue
@@ -564,13 +576,14 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                     else:
                                         QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score', 0)
                                 except Exception as e:
-                                    logger.error(f"True/False evaluation failed for question {qid}", exc_info=True)
+                                    qlogger.error(f"True/False evaluation failed for question {qid}", exc_info=True)
                                     raise TrueFalseEvaluationError(qid, response[0], correct_answer)
 
                             case "FILL_IN_BLANK":
+                                qlogger.debug(f"Evaluating fill in blank question {qid}")
                                 response = QuizResponseSchema.get_attribute(quiz_result, qid, 'student_answer')[0]
                                 if not response:
-                                    logger.warning(f"Empty response for fill in blank question {qid}")
+                                    qlogger.warning(f"Empty response for fill in blank question {qid}")
                                     QuizResponseSchema.set_attribute(quiz_result, qid, 'score', 0)
                                     QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', 'No answer provided')
                                     continue
@@ -605,7 +618,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                             if fitb_score is None or fitb_score.get('reason', '').startswith("Error:"):
                                                 error_msg = fitb_score.get(
                                                     'reason') if fitb_score else "No response from LLM"
-                                                logger.warning(
+                                                qlogger.warning(
                                                     f"Attempt {attempt + 1}/{MAX_RETRIES} failed for question {qid}. "
                                                     f"Error: {error_msg}"
                                                 )
@@ -625,7 +638,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
                                         except Exception as e:
                                             error_msg = f"Unexpected error: {str(e)}"
-                                            logger.warning(
+                                            qlogger.warning(
                                                 f"Attempt {attempt + 1}/{MAX_RETRIES} failed for question {qid}. "
                                                 f"Error: {error_msg}"
                                             )
@@ -647,10 +660,10 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                 QuizResponseSchema.set_attribute(quiz_result, qid, 'remarks', fitb_score['reason'])
 
                             case _:
-                                logger.warning(f"Unhandled question type: {question.get('type')!r} for question {qid}")
+                                qlogger.warning(f"Unhandled question type: {question.get('type')!r} for question {qid}")
 
                     except Exception as e:
-                        logger.error(
+                        qlogger.error(
                             f"Error evaluating question {qid} of type {question.get('type')}:\n"
                             f"Error: {str(e)}\n"
                             f"Question data: {json.dumps(question, indent=2)}\n"
@@ -667,15 +680,17 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
                 # Save result back to database
                 await set_quiz_response(pg_cursor, pg_conn, quiz_result)
+                qlogger.info(f"Response {quiz_result['id']} evaluated. Final score: {quiz_result['score']}")
 
     except Exception as e:
+        qlogger.error(f"Evaluation failed: {str(e)}", exc_info=True)
         if isinstance(e, (NoQuestionsError, NoResponsesError, InvalidQuestionError,
                           LLMEvaluationError, TotalScoreError, DatabaseConnectionError)):
             # These are already formatted nicely, just log them
-            logger.error(str(e))
+            qlogger.error(str(e))
         else:
             # Unexpected errors need more context
-            logger.error(
+            qlogger.error(
                 f"Unexpected error during evaluation of quiz {quiz_id}:\n"
                 f"Error Type: {type(e).__name__}\n"
                 f"Error Details: {str(e)}\n"
@@ -698,10 +713,13 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     else:
         try:
             # Generate and save quiz report
+            qlogger.info("Generating quiz report")
             quiz_report = await generate_quiz_report(quiz_id, quiz_responses, questions)
             await save_quiz_report(quiz_id, quiz_report, pg_cursor, pg_conn, save_to_file)
+            qlogger.info("Quiz report generated and saved successfully")
 
             # Update evaluation status
+            qlogger.info("Updating quiz evaluation status")
             pg_cursor.execute(
                 """UPDATE "Quiz" SET "isEvaluated" = 'EVALUATED' WHERE "id" = %s""",
                 (quiz_id,)
@@ -720,12 +738,14 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                 quiz_id, 'metadata')
 
         except Exception as e:
-            logger.error(f"Error in evaluation cleanup for quiz {quiz_id}: {str(e)}", exc_info=True)
+            qlogger.error(f"Error in evaluation cleanup for quiz {quiz_id}: {str(e)}", exc_info=True)
             raise EvaluationError(f"Evaluation completed but failed during cleanup: {str(e)}")
 
     finally:
         if save_to_file:
+            qlogger.info("Saving final evaluation results")
             save_quiz_data(quiz_responses, quiz_id, 'responses_evaluated')
+        qlogger.info("Evaluation complete")
 
     return quiz_responses
 

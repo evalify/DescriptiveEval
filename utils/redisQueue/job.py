@@ -2,7 +2,7 @@ from utils.database import get_postgres_cursor, get_mongo_client, get_redis_clie
 from model import get_llm
 from evaluation import bulk_evaluate_quiz_responses
 from utils.errors import *
-from utils.logger import logger
+from utils.logger import logger, QuizLogger
 from functools import wraps
 import asyncio
 
@@ -53,7 +53,9 @@ async def handle_evaluation(job_id: str, func):
 async def evaluation_job(quiz_id: str, model_provider, model_name, model_api_key, override_evaluated=False, types_to_evaluate=None):
     """Execute the evaluation job for the given quiz ID."""
     job_id = f"eval_{quiz_id}_{model_name}"
-    logger.info(f"Starting evaluation job {job_id}")
+    qlogger = QuizLogger(quiz_id)
+    qlogger.info(f"Starting evaluation job {job_id}")
+    qlogger.debug(f"Job parameters: provider={model_provider}, model={model_name}, override={override_evaluated}, types={types_to_evaluate}")
     
     pg_cursor = pg_conn = None
     
@@ -62,11 +64,12 @@ async def evaluation_job(quiz_id: str, model_provider, model_name, model_api_key
         pg_cursor, pg_conn = get_postgres_cursor()
         mongo_db = get_mongo_client()
         redis_client = get_redis_client()
-        logger.info(f"Job {job_id}: Connections established")
+        qlogger.debug(f"Database connections established for job {job_id}")
         
         llm = None
         if model_name is not None:
             llm = get_llm(provider=model_provider, model_name=model_name, api_key=model_api_key)
+            qlogger.debug(f"Initialized LLM model {model_name} for job {job_id}")
         
         async def execute_evaluation():
             result = await bulk_evaluate_quiz_responses(
@@ -76,13 +79,19 @@ async def evaluation_job(quiz_id: str, model_provider, model_name, model_api_key
             )
             return {"status": "success", "message": "Evaluation complete", "results": result}
             
-        return await handle_evaluation(job_id, execute_evaluation)
+        result = await handle_evaluation(job_id, execute_evaluation)
+        if result["status"] == "success":
+            qlogger.info(f"Job {job_id} completed successfully")
+        else:
+            qlogger.error(f"Job {job_id} failed: {result['error']} - {result['details']}")
+        return result
         
     finally:
         if pg_cursor and pg_conn:
             try:
                 pg_cursor.close()
                 pg_conn.close()
-                logger.info(f"Job {job_id}: Connections closed")
+                qlogger.debug(f"Database connections closed for job {job_id}")
             except Exception as e:
-                logger.error(f"Job {job_id}: Failed to close connections: {str(e)}")
+                qlogger.error(f"Failed to close database connections for job {job_id}: {str(e)}")
+                logger.error(f"Job {job_id}: Failed to close database connections")

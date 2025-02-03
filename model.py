@@ -48,6 +48,7 @@ async def score(llm, student_ans:str, expected_ans:str, total_score:float, quest
     :param total_score: The total score to evaluate against
     :param question: The question (optional)
     :param guidelines: The evaluation guidelines and criteria (optional)
+    :param errors: Any errors encountered during evaluation (optional)
     """
     if not expected_ans or expected_ans.strip() == "" or total_score <= 0: #TODO: Use better error handling
         return {
@@ -135,6 +136,7 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
     :param question: The question to evaluate
     :param expected_ans: The expected answer for comparison
     :param total_score: The total score to evaluate against
+    :param errors: Any errors encountered during evaluation (optional)
     """
     if not question or not expected_ans:
         return {

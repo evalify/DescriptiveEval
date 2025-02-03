@@ -9,7 +9,7 @@ from fastapi import FastAPI, Depends, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from rq import Queue, Worker
 
 from evaluation import bulk_evaluate_quiz_responses, get_quiz_responses, get_all_questions
@@ -92,13 +92,15 @@ class QAEnhancementRequest(BaseModel):
 class EvalRequest(BaseModel):
     quiz_id: str
     override_evaluated: bool = False
-    types_to_evaluate: Optional[dict] = {
+    types_to_evaluate: Optional[dict] = Field(
+        default_factory=lambda: {
             'MCQ': True,
             'DESCRIPTIVE': True,
             'CODING': True,
             'TRUE_FALSE': True,
             'FILL_IN_BLANK': True
         }
+    )
 
 
 @app.get("/")
