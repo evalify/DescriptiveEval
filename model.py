@@ -53,11 +53,23 @@ async def score(llm, student_ans:str, expected_ans:str, total_score:float, quest
     """
     if not expected_ans or expected_ans.strip() == "" or total_score <= 0:
         logger.error(f"Invalid input parameters: expected_ans='{expected_ans}', total_score='{total_score}'")
-        raise InvalidInputError("expected_ans or total_score", f"expected_ans='{expected_ans}', total_score='{total_score}'")
+        return {
+            "rubric": "Error: Invalid input parameters",
+            "breakdown": "Error: Invalid input parameters",
+            "score": 0.0,
+            "reason": "Error: Invalid input parameters: expected_ans='{expected_ans}', total_score='{total_score}'",
+            "status": 403
+        }
 
     if not student_ans or student_ans.strip() == "":
         logger.error("Student answer is empty or missing")
-        raise EmptyAnswerError()
+        return {
+            "rubric": "Error: Student answer is empty or missing",
+            "breakdown": "Error: Student answer is empty or missing",
+            "score": 0.0,
+            "reason": "Error: Student answer is empty or missing",
+            "status": 403
+        }
 
     # Update response schemas to include 'rubric' and 'breakdown'
     response_schemas = [
@@ -113,7 +125,12 @@ async def score(llm, student_ans:str, expected_ans:str, total_score:float, quest
         with open("logs/score_error.log", "a") as f:
             f.write(f"Error: {str(e)}\n")
             f.write(f"Response: {response}\n\n-----------------\n\n")
-        raise
+        return {
+            "rubric": "Error: Could not generate rubric",
+            "breakdown": "Error: Could not generate breakdown",
+            "score": 0.0,
+            "reason": f"Error: Error processing response: {str(e)}"
+        }
 
 
 async def generate_guidelines(llm, question: str, expected_ans: str, total_score: int = 5, errors = None) -> dict:
@@ -128,7 +145,11 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
     """
     if not question or not expected_ans:
         logger.error("Provide a question and expected answer to generate evaluation rubric/guidelines")
-        raise InvalidInputError("question or expected_ans", f"question='{question}', expected_ans='{expected_ans}'")
+        return {
+            "status": 403,
+            "guidelines": "Error: Provide a question and expected answer to generate evaluation rubric/guidelines",
+            "error": "Missing required parameters"
+        }
 
     # Define response schema for guidelines
     guidelines_schema = [
@@ -164,7 +185,11 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
         }
     except Exception as e:
         logger.error(f"Error processing response: {str(e)}", exc_info=True)
-        raise
+        return {
+            "status": 403,
+            "guidelines": f"Error: Error processing response",
+            "error": str(e)
+        }
 
 
 async def enhance_question_and_answer(llm, question: str, expected_ans: str) -> dict:
@@ -177,7 +202,12 @@ async def enhance_question_and_answer(llm, question: str, expected_ans: str) -> 
     """
     if not question or not expected_ans:
         logger.error("Provide a question and expected answer to enhance the content")
-        raise InvalidInputError("question or expected_ans", f"question='{question}', expected_ans='{expected_ans}'")
+        return {
+            "status": 403,
+            "enhanced_question": "Provide a question and expected answer to enhance the content",
+            "enhanced_expected_ans": "Provide a question and expected answer to enhance the content",
+            "error": "Missing required parameters"
+        }
 
     # Define response schema for enhanced content
     enhanced_content_schema = [
@@ -214,7 +244,12 @@ async def enhance_question_and_answer(llm, question: str, expected_ans: str) -> 
         }
     except Exception as e:
         logger.error(f"Error processing response: {str(e)}", exc_info=True)
-        raise
+        return {
+            "status": 403,
+            "enhanced_question": "Error processing response",
+            "enhanced_expected_ans": "Error processing response", 
+            "error": str(e)
+        }
 
 async def score_fill_in_blank(llm, student_ans: str, expected_ans:str, total_score:float, question:str) -> dict:
     """
@@ -228,11 +263,17 @@ async def score_fill_in_blank(llm, student_ans: str, expected_ans:str, total_sco
     """
     if not expected_ans or expected_ans.strip() == "":
         logger.error("Expected answer is empty or missing")
-        raise InvalidInputError("expected_ans", f"expected_ans='{expected_ans}'")
+        return {
+            "score": 0.0,
+            "reason": "Error: Expected answer is empty or missing",
+        }
 
     if not student_ans or student_ans.strip() == "":
         logger.error("Student answer is empty or missing")
-        raise EmptyAnswerError()
+        return {
+            "score": 0.0,
+            "reason": "Error: Student answer is empty or missing",
+        }
 
     # Update response schemas to include 'rubric' and 'breakdown'
     response_schemas = [
@@ -274,7 +315,11 @@ async def score_fill_in_blank(llm, student_ans: str, expected_ans:str, total_sco
         }
     except Exception as e:
         logger.error(f"Error processing response: {str(e)}", exc_info=True)
-        raise
+        return {
+            "status": 403,
+            "score": 0.0,
+            "reason": f"Error: Error processing response: {str(e)}"
+        }
 
 
 if __name__ == "__main__":
