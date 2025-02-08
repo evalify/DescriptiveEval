@@ -3,6 +3,7 @@ from model import get_llm
 from evaluation import bulk_evaluate_quiz_responses
 from utils.errors import *
 from utils.logger import logger, QuizLogger
+from utils.redisQueue.lock import QuizLock
 from functools import wraps
 import asyncio
 
@@ -58,12 +59,25 @@ async def evaluation_job(quiz_id: str, model_provider, model_name, model_api_key
     qlogger.debug(f"Job parameters: provider={model_provider}, model={model_name}, override={override_evaluated}, types={types_to_evaluate}")
     
     pg_cursor = pg_conn = None
+    redis_client = get_redis_client()
+    
+    # Create a lock for this quiz
+    quiz_lock = QuizLock(redis_client, quiz_id)
     
     try:
+        # Try to acquire the lock (non-blocking)
+        if not quiz_lock.acquire(blocking=False):
+            remaining_time = quiz_lock.get_lock_ttl()
+            qlogger.warning(f"Quiz {quiz_id} is already being evaluated. Remaining time: {remaining_time}s")
+            return {
+                "status": "locked",
+                "message": f"Quiz {quiz_id} is already being evaluated",
+                "remaining_time": remaining_time
+            }
+    
         # Initialize connections
         pg_cursor, pg_conn = get_postgres_cursor()
         mongo_db = get_mongo_client()
-        redis_client = get_redis_client()
         qlogger.debug(f"Database connections established for job {job_id}")
         
         llm = None
@@ -87,6 +101,9 @@ async def evaluation_job(quiz_id: str, model_provider, model_name, model_api_key
         return result
         
     finally:
+        # Release the lock in finally block to ensure it's released even if an error occurs
+        quiz_lock.release()
+        
         if pg_cursor and pg_conn:
             try:
                 pg_cursor.close()

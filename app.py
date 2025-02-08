@@ -20,6 +20,7 @@ from utils.logger import logger
 from utils.redisQueue import job as rq_job
 from utils.redisQueue.wakeup_workers import spawn_workers, check_workers
 from utils.errors import InvalidProviderError, InvalidInputError, EmptyAnswerError, InvalidQuizIDError
+from utils.redisQueue.lock import QuizLock
 
 app = FastAPI()
 logger.info("Initializing FastAPI application")
@@ -289,6 +290,21 @@ async def evaluate_bulk_queue(
     logger.info(f"[{trace_id}] Queueing evaluation for quiz_id: {request.quiz_id}")
 
     try:
+        # Check if quiz is already being evaluated
+        redis_client = get_redis_client()
+        quiz_lock = QuizLock(redis_client, request.quiz_id)
+        
+        if quiz_lock.is_locked():
+            remaining_time = quiz_lock.get_lock_ttl()
+            logger.warning(f"[{trace_id}] Quiz {request.quiz_id} is already being evaluated. Remaining time: {remaining_time}s")
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "message": f"Quiz {request.quiz_id} is already being evaluated",
+                    "remaining_time": remaining_time
+                }
+            )
+
         job = tasks_queue.enqueue(
             rq_job.evaluation_job,
             request.quiz_id,
@@ -304,6 +320,7 @@ async def evaluate_bulk_queue(
     except Exception as e:
         logger.error(f"[{trace_id}] Failed to queue evaluation", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
+
 
 @app.post("/regenerate-quiz-report/{quiz_id}")
 async def regenerate_quiz_report(quiz_id: str):
