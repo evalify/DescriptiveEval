@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from langchain.output_parsers import ResponseSchema, StructuredOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_groq import ChatGroq
-from langchain_ollama import OllamaLLM
+from langchain_ollama import ChatOllama
 
 load_dotenv()
 
@@ -27,13 +27,13 @@ def get_llm(provider: LLMProvider = LLMProvider.GROQ, api_key=None, model_name=N
     :param model_name: The model name for the provider (optional)
     """
     if provider == LLMProvider.OLLAMA:
-        return OllamaLLM(model=model_name if model_name else "llama3.3",
-                         base_url=os.getenv("OLLAMA_HOST", "http://localhost:11434"))
+        return ChatOllama(model=model_name if model_name else "llama3.3",
+                         base_url=os.getenv("OLLAMA_HOST", "http://localhost:11434"), temperature=0.2, format="json")
     elif provider == LLMProvider.GROQ:
         return ChatGroq(
             api_key=api_key if api_key else os.getenv("GROQ_API_KEY"),
             model_name=model_name if model_name else "llama-3.3-70b-specdec",
-            temperature=0.2,
+            temperature=0.2
         )
     else:
         raise InvalidProviderError(provider)
@@ -171,6 +171,7 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
         errors=errors
     )
 
+    response = None
     try:
         response = await llm.ainvoke(_input)
         if hasattr(response, 'content'):
@@ -184,7 +185,7 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
             "guidelines": str(parsed_response.get("guidelines", "No guidelines available"))
         }
     except Exception as e:
-        logger.error(f"Error processing response: {str(e)}", exc_info=True)
+        logger.error(f"Error processing response: {str(e)}. {response=}", exc_info=True)
         return {
             "status": 403,
             "guidelines": f"Error: Error processing response",

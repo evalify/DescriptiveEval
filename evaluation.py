@@ -63,10 +63,11 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
         logger.error(f"Failed to generate guidelines for question {question_id} after {MAX_RETRIES} attempts.\n"
                         f"Errors encountered:\n{error_details}\n"
                         f"Guidelines response: {guidelines if guidelines else 'None'}")
-        raise LLMEvaluationError(
-            f"Failed to generate guidelines after {MAX_RETRIES} attempts.\nErrors encountered:\n{error_details}")
-
-    redis_client.set(question_id + '_guidelines_cache', json.dumps(guidelines), ex=86400)
+        # FIXME: Temporary error override
+        # raise LLMEvaluationError(
+            # f"Failed to generate guidelines after {MAX_RETRIES} attempts.\nErrors encountered:\n{error_details}")
+        logger.warning(f"Failed to generate guidelines for question {question_id} after {MAX_RETRIES} attempts.\n")
+    redis_client.set(f'guidelines:{question_id}_guidelines_cache', json.dumps(guidelines), ex=86400)
     logger.info(f"Successfully generated and cached guidelines for question {question_id}")
     return guidelines
 
@@ -119,7 +120,7 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
         response['id'] = str(response['id'])
         response['submittedAt'] = str(response['submittedAt'])
 
-    redis_client.set(f'{quiz_id}_responses_evalcache', json.dumps(quiz_responses, cls=DateTimeEncoder), ex=CACHE_EX)
+    redis_client.set(f'responses:{quiz_id}_responses_evalcache', json.dumps(quiz_responses, cls=DateTimeEncoder), ex=CACHE_EX)
 
     if save_to_file:
         save_quiz_data(quiz_responses, quiz_id, 'responses')
@@ -182,7 +183,7 @@ def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=
     if save_to_file:
         save_quiz_data(questions, quiz_id, 'questions')
 
-    redis_client.set(f'{quiz_id}_questions_evalcache', json.dumps(questions, cls=DateTimeEncoder), ex=CACHE_EX)
+    redis_client.set(f'questions:{quiz_id}_questions_evalcache', json.dumps(questions, cls=DateTimeEncoder), ex=CACHE_EX)
 
     return questions
 
@@ -479,6 +480,9 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                         expected_answer=question["expectedAnswer"],
                                         total_score=question_total_score
                                     )
+
+                                    if question_guidelines.get('status', 403) == 403:
+                                        continue
 
                                     errors = []
                                     for attempt in range(MAX_RETRIES):
