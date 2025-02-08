@@ -34,9 +34,9 @@ MAX_RETRIES = int(os.getenv('MAX_RETRIES', 10))  # Maximum number of retries for
 async def get_guidelines(redis_client: Redis, llm, question_id: str, question: str, expected_answer: str,
                          total_score: int):
     """Get the guidelines for a question from the cache."""
-    # FIXME: Temporary override to use microLLM
+     # FIXME: Temporary override to use microLLM
     llm = get_llm(provider=LLMProvider.GROQ, model_name='llama-3.3-70b-versatile')
-    cached_guidelines = redis_client.get(question_id + '_guidelines_cache')
+    cached_guidelines = redis_client.get(f"guidelines:{question_id}_guidelines_cache")
     if cached_guidelines:
         return json.loads(cached_guidelines)
 
@@ -67,8 +67,9 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
         # raise LLMEvaluationError(
             # f"Failed to generate guidelines after {MAX_RETRIES} attempts.\nErrors encountered:\n{error_details}")
         logger.warning(f"Failed to generate guidelines for question {question_id} after {MAX_RETRIES} attempts.\n")
-    redis_client.set(f'guidelines:{question_id}_guidelines_cache', json.dumps(guidelines), ex=86400)
-    logger.info(f"Successfully generated and cached guidelines for question {question_id}")
+    else:
+        redis_client.set(f'guidelines:{question_id}_guidelines_cache', json.dumps(guidelines), ex=86400)
+        logger.info(f"Successfully generated and cached guidelines for question {question_id}")
     return guidelines
 
 
@@ -104,7 +105,7 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
     :param quiz_id: The ID of the quiz to retrieve responses for
     :param save_to_file: Save the responses to a file (default: True)
     """
-    cached_responses = redis_client.get(quiz_id + '_responses_evalcache')
+    cached_responses = redis_client.get(f"responses:{quiz_id}_responses_evalcache")
     if cached_responses:
         print("Responses Cache hit!")
         save_quiz_data(json.loads(cached_responses), quiz_id, 'responses')
@@ -167,7 +168,7 @@ def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=
     :param save_to_file: Save the questions to a file (default: True)
     :param save_to_file: Save the questions to a file (default: True)
     """
-    cached_questions = redis_client.get(quiz_id + '_questions_evalcache')
+    cached_questions = redis_client.get(f"questions:{quiz_id}_questions_evalcache")
     if cached_questions:
         print("Questions Cache hit!")
         save_quiz_data(json.loads(cached_questions), quiz_id, 'questions')
