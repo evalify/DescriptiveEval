@@ -31,15 +31,18 @@ markDistribution = {
         }
 """
 
-from typing import Any, Dict, List
-import json
 import asyncio
-import uuid
+import json
 import os
-from utils.misc import save_quiz_data
-from utils.logger import logger, QuizLogger
+import uuid
+from typing import Any, Dict, List
 
-async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]], questions: List[Dict[str, Any]]) -> Dict[str, Any]:
+from utils.logger import QuizLogger
+from utils.misc import save_quiz_data
+
+
+async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]], questions: List[Dict[str, Any]]) -> \
+Dict[str, Any]:
     """
     Generate a report for a quiz
     :param quiz_id: Quiz ID
@@ -49,12 +52,12 @@ async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]],
     """
     qlogger = QuizLogger(quiz_id)
     qlogger.debug(f"Starting report generation with {len(quiz_results)} results and {len(questions)} questions")
-    
+
     scores = [result['score'] for result in quiz_results]
     total_score = set(result['totalScore'] for result in quiz_results)
     if len(total_score) > 1:
         qlogger.warning(f"Multiple total scores found: {total_score}")
-    total_score = total_score.pop()
+    total_score = max(total_score)
     if total_score <= 0:
         msg = f"Invalid total score: {total_score}"
         qlogger.error(msg)
@@ -70,10 +73,11 @@ async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]],
     question_stats = []
     for question in questions:
         question_id = question['_id']
-        correct = sum(1 for result in quiz_results if float(result['responses'].get(question_id, {}).get('score', 0)) >= 0.6 * float(question['mark']))
+        correct = sum(1 for result in quiz_results if
+                      float(result['responses'].get(question_id, {}).get('score', 0)) >= 0.6 * float(question['mark']))
         incorrect = len(quiz_results) - correct
-        total_marks_obtained = sum(result['responses'].get(question_id,{}).get('score', 0) for result in quiz_results)
-        
+        total_marks_obtained = sum(result['responses'].get(question_id, {}).get('score', 0) for result in quiz_results)
+
         stats = {
             'questionId': question_id,
             'questionText': question['question'],
@@ -84,7 +88,8 @@ async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]],
             'maxMarks': question['mark']
         }
         question_stats.append(stats)
-        qlogger.debug(f"Question {question_id} stats - Correct: {correct}, Incorrect: {incorrect}, Avg marks: {stats['avgMarks']:.2f}")
+        qlogger.debug(
+            f"Question {question_id} stats - Correct: {correct}, Incorrect: {incorrect}, Avg marks: {stats['avgMarks']:.2f}")
 
     mark_distribution = {
         'excellent': sum(1 for score in normalized_scores if 80 <= score <= 100),
@@ -93,7 +98,8 @@ async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]],
         'poor': sum(1 for score in normalized_scores if 0 <= score <= 39)
     }
 
-    qlogger.info(f"Mark distribution - Excellent: {mark_distribution['excellent']}, Good: {mark_distribution['good']}, Average: {mark_distribution['average']}, Poor: {mark_distribution['poor']}")
+    qlogger.info(
+        f"Mark distribution - Excellent: {mark_distribution['excellent']}, Good: {mark_distribution['good']}, Average: {mark_distribution['average']}, Poor: {mark_distribution['poor']}")
 
     return {
         'quizId': quiz_id,
@@ -105,6 +111,7 @@ async def generate_quiz_report(quiz_id: str, quiz_results: List[Dict[str, Any]],
         'questionStats': question_stats,
         'markDistribution': mark_distribution
     }
+
 
 async def save_quiz_report(quiz_id: str, report: Dict[str, Any], cursor, conn, save_to_file: bool = True) -> None:
     """
@@ -118,7 +125,7 @@ async def save_quiz_report(quiz_id: str, report: Dict[str, Any], cursor, conn, s
     qlogger = QuizLogger(quiz_id)
     retries = 0
     max_retries = int(os.getenv('DB_MAX_RETRIES', 3))
-    
+
     while retries < max_retries:
         try:
             # Save to database
@@ -144,7 +151,7 @@ async def save_quiz_report(quiz_id: str, report: Dict[str, Any], cursor, conn, s
                     uuid.uuid4().hex,
                     quiz_id,
                     report['maxScore'],
-                    report['avgScore'], 
+                    report['avgScore'],
                     report['minScore'],
                     report['totalScore'],
                     report['totalStudents'],

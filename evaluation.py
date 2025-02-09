@@ -34,8 +34,8 @@ MAX_RETRIES = int(os.getenv('MAX_RETRIES', 10))  # Maximum number of retries for
 async def get_guidelines(redis_client: Redis, llm, question_id: str, question: str, expected_answer: str,
                          total_score: int):
     """Get the guidelines for a question from the cache."""
-     # FIXME: Temporary override to use microLLM
-    llm = get_llm(provider=LLMProvider.GROQ, model_name='llama-3.3-70b-versatile')
+    # FIXME: Temporary override to use microLLM
+    # llm = get_llm(provider=LLMProvider.GROQ, model_name='llama-3.3-70b-versatile')
     cached_guidelines = redis_client.get(f"guidelines:{question_id}_guidelines_cache")
     if cached_guidelines:
         return json.loads(cached_guidelines)
@@ -46,8 +46,9 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
     for attempt in range(MAX_RETRIES):
         try:
             guidelines = await generate_guidelines(llm, question, expected_answer, total_score, errors)
-            if guidelines['guidelines'].startswith(("Error:", "Error processing response:")) or guidelines['status']==403:
-                error_msg = guidelines['guidelines']
+            if guidelines['guidelines'].startswith(("Error:", "Error processing response:")) or guidelines[
+                'status'] == 403:
+                error_msg = guidelines.get('error')
                 logger.warning(
                     f"Attempt {attempt + 1}/{MAX_RETRIES}: Failed to generate guidelines for question {question_id}: {error_msg}")
                 errors.append(error_msg)
@@ -61,14 +62,14 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
     if guidelines is None or int(guidelines.get("status", 403)) == 403:
         error_details = "\n".join(errors)
         logger.error(f"Failed to generate guidelines for question {question_id} after {MAX_RETRIES} attempts.\n"
-                        f"Errors encountered:\n{error_details}\n"
-                        f"Guidelines response: {guidelines if guidelines else 'None'}")
+                     f"Errors encountered:\n{error_details}\n"
+                     f"Guidelines response: {guidelines if guidelines else 'None'}")
         # FIXME: Temporary error override
         # raise LLMEvaluationError(
-            # f"Failed to generate guidelines after {MAX_RETRIES} attempts.\nErrors encountered:\n{error_details}")
+        # f"Failed to generate guidelines after {MAX_RETRIES} attempts.\nErrors encountered:\n{error_details}")
         logger.warning(f"Failed to generate guidelines for question {question_id} after {MAX_RETRIES} attempts.\n")
     else:
-        redis_client.set(f'guidelines:{question_id}_guidelines_cache', json.dumps(guidelines), ex=86400)
+        await redis_client.set(f'guidelines:{question_id}_guidelines_cache', json.dumps(guidelines), ex=86400)
         logger.info(f"Successfully generated and cached guidelines for question {question_id}")
     return guidelines
 
@@ -121,7 +122,8 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
         response['id'] = str(response['id'])
         response['submittedAt'] = str(response['submittedAt'])
 
-    redis_client.set(f'responses:{quiz_id}_responses_evalcache', json.dumps(quiz_responses, cls=DateTimeEncoder), ex=CACHE_EX)
+    redis_client.set(f'responses:{quiz_id}_responses_evalcache', json.dumps(quiz_responses, cls=DateTimeEncoder),
+                     ex=CACHE_EX)
 
     if save_to_file:
         save_quiz_data(quiz_responses, quiz_id, 'responses')
@@ -184,7 +186,8 @@ def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=
     if save_to_file:
         save_quiz_data(questions, quiz_id, 'questions')
 
-    redis_client.set(f'questions:{quiz_id}_questions_evalcache', json.dumps(questions, cls=DateTimeEncoder), ex=CACHE_EX)
+    redis_client.set(f'questions:{quiz_id}_questions_evalcache', json.dumps(questions, cls=DateTimeEncoder),
+                     ex=CACHE_EX)
 
     return questions
 
@@ -234,7 +237,8 @@ async def validate_quiz_setup(quiz_id: str, questions: List[dict], responses: Li
 
 async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_db,
                                        redis_client: Redis, save_to_file: bool = True, llm=None,
-                                       override_evaluated: bool = False, types_to_evaluate: Optional[Dict[str, bool]] = None):
+                                       override_evaluated: bool = False,
+                                       types_to_evaluate: Optional[Dict[str, bool]] = None):
     """
     Evaluate all responses for a quiz with rubric caching and parallel processing.
     
@@ -263,7 +267,12 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
     qlogger = QuizLogger(quiz_id)
     eval_logger = EvaluationLogger(quiz_id)
     qlogger.info(f"Starting evaluation for quiz {quiz_id}")
-    qlogger.info(f"Evaluation parameters: override_evaluated={override_evaluated}, types_to_evaluate={types_to_evaluate}")
+    qlogger.info(
+        f"Evaluation parameters: override_evaluated={override_evaluated}, types_to_evaluate={types_to_evaluate}")
+
+    # Initialize variables here to prevent unbound local var error
+    question_count_by_type = {} # Count questions by type
+    quiz_responses = None
 
     if not types_to_evaluate:
         types_to_evaluate = {
@@ -297,15 +306,14 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
         # Get evaluation settings with defaults
         evaluation_settings = get_evaluation_settings(pg_cursor, quiz_id) or {}
+        negative_marking = evaluation_settings.get("negativeMark", False)
+        mcq_partial_marking = evaluation_settings.get("mcqPartialMark", True)
         if not evaluation_settings:
             qlogger.warning(
                 f"No evaluation settings found for quiz {quiz_id}. Using defaults:\n"
-                "- Negative marking: False\n"
-                "- MCQ partial marking: False"
+                f"- Negative marking: {negative_marking}\n"
+                f"- MCQ partial marking: {mcq_partial_marking}"
             )
-
-        negative_marking = evaluation_settings.get("negativeMark", False)
-        mcq_partial_marking = evaluation_settings.get("mcqPartialMark", True)
 
         qlogger.info(f"Evaluation Settings for quiz {quiz_id}:\n")
         qlogger.info(f"Negative Marking: {negative_marking}")
@@ -324,8 +332,6 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
             groq_api_keys = itertools.cycle(valid_keys)
             qlogger.info(f"Using {len(valid_keys)} API keys in rotation for evaluation")
 
-        # Count questions by type
-        question_count_by_type = {}
         for question in questions:
             q_type = question.get('type', 'UNKNOWN').upper()
             question_count_by_type[q_type] = question_count_by_type.get(q_type, 0) + 1
@@ -370,15 +376,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                     question_type = question.get("type", "").upper()
                     qlogger.debug(f"Evaluating question {qid} of type {question_type}")
 
-                    # Skip question if its type is not in types_to_evaluate
-                    if types_to_evaluate and not types_to_evaluate.get(question_type,
-                                                                       types_to_evaluate.get(question_type.lower(),
-                                                                                             True)):
-                        qlogger.info(
-                            f"Skipping evaluation for question {qid} of type {question_type} as per types_to_evaluate")
-                        continue
-
-                    if not quiz_result["responses"] or qid not in quiz_result["responses"]:
+                    if not quiz_result["responses"]:
+                        qlogger.warning(f"No responses found for quiz response {quiz_result['id']}")
                         continue
 
                     # Handle old schema conversion
@@ -401,6 +400,18 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                             f"Question data: {json.dumps(question, indent=2)}"
                         )
 
+                    if qid not in quiz_result["responses"]:
+                        qlogger.warning(f"No response found for question {qid} in quiz response {quiz_result['id']}")
+                        continue  # TODO: Check for issues caused by misplacement of this block in previous versions
+
+                    # Skip question if its type is not in types_to_evaluate
+                    if types_to_evaluate and not types_to_evaluate.get(question_type,
+                                                                       types_to_evaluate.get(question_type.lower(),
+                                                                                             True)):
+                        qlogger.info(
+                            f"Skipping evaluation for question {qid} of type {question_type} as per types_to_evaluate")
+                        continue
+
                     # Question type specific evaluation
                     try:
                         # Track evaluation metadata
@@ -409,7 +420,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                             "questionType": question_type,
                             "evaluationAttempts": 0  # Will be updated for LLM evaluations
                         }
-
+                        attempt = 0
                         match question.get("type", "").upper():
                             case "MCQ":
                                 qlogger.debug(f"Evaluating MCQ question {qid}")
@@ -446,7 +457,7 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                         QuizResponseSchema.set_attribute(quiz_result, qid, 'negative_score', 0)
 
                                     eval_logger.log_question_evaluation(
-                                        qid, question, quiz_result["studentId"], 
+                                        qid, question, quiz_result["studentId"],
                                         quiz_result["responses"][qid],
                                         {
                                             "score": mcq_score,
@@ -495,7 +506,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
                                                 expected_ans=" ".join(question["expectedAnswer"]),
                                                 total_score=question_total_score,
                                                 guidelines=question_guidelines,
-                                                errors=errors if attempt < 5 else errors+[f"Warning: Attempt remaining {MAX_RETRIES-attempt-1}"]
+                                                errors=errors if attempt < 5 else errors + [
+                                                    f"Warning: Attempt remaining {MAX_RETRIES - attempt - 1}"]
                                             )
 
                                             if any(score_res[key].startswith("Error:") for key in
@@ -545,8 +557,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
                                 # Update metadata with LLM attempts
                                 evaluation_metadata["evaluationAttempts"] = attempt + 1
-                                evaluation_metadata["llmProvider"] = current_llm.__class__.__name__
-                                
+                                evaluation_metadata["llmProvider"] = llm.__class__.__name__
+
                                 eval_logger.log_question_evaluation(
                                     qid, question, quiz_result["studentId"],
                                     quiz_result["responses"][qid],
@@ -718,8 +730,8 @@ async def bulk_evaluate_quiz_responses(quiz_id: str, pg_cursor, pg_conn, mongo_d
 
                                 # Update metadata with LLM attempts
                                 evaluation_metadata["evaluationAttempts"] = attempt + 1
-                                evaluation_metadata["llmProvider"] = current_llm.__class__.__name__
-                                
+                                evaluation_metadata["llmProvider"] = llm.__class__.__name__
+
                                 eval_logger.log_question_evaluation(
                                     qid, question, quiz_result["studentId"],
                                     quiz_result["responses"][qid],
@@ -840,15 +852,18 @@ if __name__ == "__main__":
         pg_conn=my_pg_conn,
         mongo_db=my_mongo_db,
         redis_client=my_redis_client,
-        save_to_file=True)
+        save_to_file=True,
+        types_to_evaluate={
+            'MCQ': False,
+            'DESCRIPTIVE': False,
+            'CODING': False,
+            'TRUE_FALSE': False,
+            'FILL_IN_BLANK': False
+        })
     )
 
     # Get quiz results
     # my_results = get_quiz_responses(my_pg_cursor, my_redis_client, my_quiz_id)
-    # with open('data/json/quiz_responses_quiz3.json', 'w') as f:
-    #     json.dump(my_results, f, indent=4)
 
     # Get all questions
     # my_questions = get_all_questions(my_mongo_db, my_redis_client, my_quiz_id)
-    # with open('data/json/quiz_questions_quiz3.json', 'w') as f:
-    #     json.dump(my_questions, f, indent=4, cls=DateTimeEncoder)

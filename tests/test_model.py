@@ -1,5 +1,5 @@
-import json
 import pytest
+
 from model import get_llm, LLMProvider, score, generate_guidelines, enhance_question_and_answer, score_fill_in_blank
 from utils.logger import log_evaluation
 
@@ -103,7 +103,7 @@ async def test_score_with_question_and_guidelines():
 
 
 @pytest.mark.asyncio
-async def test_rubic_and_breakdown():
+async def test_rubric_and_breakdown():
     llm = get_llm(DEFAULT_PROVIDER)
     params = {
         "question": "Explain the process of photosynthesis.",

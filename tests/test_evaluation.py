@@ -1,19 +1,20 @@
-import pytest
 import json
-import time
+from unittest.mock import MagicMock
+
+import pytest
 from redis import Redis
-from unittest.mock import MagicMock, patch
+
 from evaluation import (
     get_guidelines,
     get_quiz_responses,
     get_all_questions,
     bulk_evaluate_quiz_responses,
-    CACHE_EX,
     set_quiz_response,
     validate_quiz_setup
 )
 from model import get_llm, LLMProvider
 from utils.errors import NoQuestionsError, NoResponsesError, InvalidQuestionError, ResponseQuestionMismatchError
+
 
 @pytest.fixture
 def redis_mock():

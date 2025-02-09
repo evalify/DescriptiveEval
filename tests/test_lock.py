@@ -1,12 +1,14 @@
-import pytest
-from unittest.mock import MagicMock, patch
-import time
 import asyncio
 import json
+from unittest.mock import MagicMock, patch
+
+import pytest
 from redis import Redis
-from utils.redisQueue.lock import QuizLock
+
 from model import LLMProvider
 from utils.redisQueue.job import evaluation_job
+from utils.redisQueue.lock import QuizLock
+
 
 @pytest.fixture
 def redis_mock():

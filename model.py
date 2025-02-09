@@ -9,9 +9,11 @@ from langchain_ollama import ChatOllama
 
 load_dotenv()
 
-from utils.evaluation.templates import evaluation_template, guidelines_template, qa_enhancement_template, fill_in_the_blank_template
+from utils.evaluation.templates import evaluation_template, guidelines_template, qa_enhancement_template, \
+    fill_in_the_blank_template
 from utils.logger import logger
-from utils.errors import InvalidProviderError, InvalidInputError, EmptyAnswerError
+from utils.errors import InvalidProviderError
+
 
 class LLMProvider(Enum):
     OLLAMA = "ollama"
@@ -28,7 +30,7 @@ def get_llm(provider: LLMProvider = LLMProvider.GROQ, api_key=None, model_name=N
     """
     if provider == LLMProvider.OLLAMA:
         return ChatOllama(model=model_name if model_name else "llama3.3",
-                         base_url=os.getenv("OLLAMA_HOST", "http://localhost:11434"), temperature=0.2, format="json")
+                          base_url=os.getenv("OLLAMA_HOST", "http://localhost:11434"), temperature=0.2, format="json")
     elif provider == LLMProvider.GROQ:
         return ChatGroq(
             api_key=api_key if api_key else os.getenv("GROQ_API_KEY"),
@@ -39,7 +41,8 @@ def get_llm(provider: LLMProvider = LLMProvider.GROQ, api_key=None, model_name=N
         raise InvalidProviderError(provider)
 
 
-async def score(llm, student_ans:str, expected_ans:str, total_score:float, question:str=None, guidelines:str=None, errors=None) -> dict:
+async def score(llm, student_ans: str, expected_ans: str, total_score: float, question: str = None,
+                guidelines: str = None, errors=None) -> dict:
     """
     Evaluate a student's answer based on the expected answer and guidelines.
 
@@ -133,7 +136,7 @@ async def score(llm, student_ans:str, expected_ans:str, total_score:float, quest
         }
 
 
-async def generate_guidelines(llm, question: str, expected_ans: str, total_score: int = 5, errors = None) -> dict:
+async def generate_guidelines(llm, question: str, expected_ans: str, total_score: int = 5, errors=None) -> dict:
     """
     Generate evaluation guidelines and criteria for a given question and expected answer.
 
@@ -189,7 +192,13 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
         return {
             "status": 403,
             "guidelines": f"Error: Error processing response",
-            "error": str(e)
+            "error": str(e),
+            "prompt": prompt_template.format(
+                question=question,
+                expected_ans=expected_ans,
+                score=total_score,
+                errors=errors
+            )
         }
 
 
@@ -248,11 +257,12 @@ async def enhance_question_and_answer(llm, question: str, expected_ans: str) -> 
         return {
             "status": 403,
             "enhanced_question": "Error processing response",
-            "enhanced_expected_ans": "Error processing response", 
+            "enhanced_expected_ans": "Error processing response",
             "error": str(e)
         }
 
-async def score_fill_in_blank(llm, student_ans: str, expected_ans:str, total_score:float, question:str) -> dict:
+
+async def score_fill_in_blank(llm, student_ans: str, expected_ans: str, total_score: float, question: str) -> dict:
     """
     Evaluate fill in the blank questions based on the expected answer and guidelines.
 
@@ -311,7 +321,7 @@ async def score_fill_in_blank(llm, student_ans: str, expected_ans:str, total_sco
         parsed_response = output_parser.parse(response)
         assert float(parsed_response.get("score", 0.0)) <= total_score, "Error: Score exceeds total score"
         return {
-            "score": float(parsed_response.get("score", 0.0)), 
+            "score": float(parsed_response.get("score", 0.0)),
             "reason": str(parsed_response.get("reason", "No reason provided"))
         }
     except Exception as e:
@@ -326,7 +336,7 @@ async def score_fill_in_blank(llm, student_ans: str, expected_ans:str, total_sco
 if __name__ == "__main__":
     import asyncio
     import time
-    
+
     my_llm = get_llm(provider=LLMProvider.OLLAMA, model_name="deepseek-r1:70b")
     # Test fill in the blank scoring
     my_question = "The Capital of France is ________."

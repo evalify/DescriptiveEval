@@ -1,9 +1,10 @@
+import asyncio
 import os
 import time
 import uuid
-from typing import Optional
 from contextlib import asynccontextmanager
-import asyncio
+from typing import Optional
+
 import deprecated
 import psutil
 from fastapi import FastAPI, Depends, Request, HTTPException
@@ -16,13 +17,14 @@ from rq.job import JobStatus
 
 from evaluation import bulk_evaluate_quiz_responses, get_quiz_responses, get_all_questions
 from model import LLMProvider, get_llm, score, generate_guidelines, enhance_question_and_answer
-from utils.quiz.quiz_report import generate_quiz_report, save_quiz_report
 from utils.database import get_postgres_cursor, get_mongo_client, get_redis_client
+from utils.errors import InvalidInputError, EmptyAnswerError, InvalidQuizIDError
 from utils.logger import logger
+from utils.quiz.quiz_report import generate_quiz_report, save_quiz_report
 from utils.redisQueue import job as rq_job
-from utils.redisQueue.wakeup_workers import spawn_workers, check_workers
-from utils.errors import InvalidProviderError, InvalidInputError, EmptyAnswerError, InvalidQuizIDError
 from utils.redisQueue.lock import QuizLock
+from utils.redisQueue.wakeup_workers import spawn_workers, check_workers
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,7 +37,7 @@ async def lifespan(app: FastAPI):
 
         # Check if we're in test environment
         is_test = bool(os.getenv('PYTEST_CURRENT_TEST'))
-        
+
         if not is_test:
             # Clean up any stale workers first
             stale_workers = Worker.all(connection=redis_conn)
@@ -54,24 +56,24 @@ async def lifespan(app: FastAPI):
                         logger.info(f"Cleaned up stale worker {w.name}")
                 except (IndexError, ValueError, psutil.NoSuchProcess):
                     continue
-            
+
             app.state.worker_processes = spawn_workers()
-            
+
             # Verify workers registered correctly
             timeout = time.time() + 30  # 30 seconds timeout
             while time.time() < timeout:
                 registered_workers = Worker.all(connection=redis_conn)
                 registered_pids = {
-                    int(w.name.split('.')[1]) 
-                    for w in registered_workers 
+                    int(w.name.split('.')[1])
+                    for w in registered_workers
                     if len(w.name.split('.')) > 1 and w.name.split('.')[1].isdigit()
                 }
                 spawned_pids = {p.pid for p in app.state.worker_processes}
-                
+
                 if registered_pids >= spawned_pids:
                     break
                 await asyncio.sleep(1)
-            
+
             logger.info(f"Initialized {len(app.state.worker_processes)} worker processes during startup")
         else:
             # In test environment, use mock workers from app state if they exist
@@ -81,21 +83,20 @@ async def lifespan(app: FastAPI):
                 await asyncio.sleep(5)  # Wait for workers to start asynchronously
             logger.info(f"Test environment: Initialized {len(app.state.worker_processes)} mock workers")
             logger.info(f"Test environment: Using {len(app.state.worker_processes)} mock workers")
-        
+
         # Add Redis queue to app state for easy access
         app.state.task_queue = Queue('task_queue', connection=redis_conn)
-        
+
     except Exception as e:
         logger.critical("Failed to initialize workers during startup", exc_info=True)
         app.state.worker_processes = []
         app.state.task_queue = Queue('task_queue', connection=redis_conn)
 
-    
     yield
-    
+
     # Shutdown: Cleanup workers
     logger.info("Application shutdown: Cleaning up workers...")
-    
+
     # Get all active jobs first
     active_jobs = {}
     for process in app.state.worker_processes:
@@ -108,14 +109,14 @@ async def lifespan(app: FastAPI):
                     active_jobs[worker.name] = current_job
         except Exception as e:
             logger.error(f"Error getting job for worker {process.pid}: {str(e)}")
-    
+
     # Now clean up workers
     for process in app.state.worker_processes:
         try:
             # Get the worker from Redis
             workers = Worker.all(connection=redis_conn)
             worker = next((w for w in workers if str(process.pid) in w.name), None)
-            
+
             if worker:
                 # Handle any current job
                 if worker.name in active_jobs:
@@ -133,11 +134,11 @@ async def lifespan(app: FastAPI):
                             logger.info(f"Re-queued job {current_job.id}")
                         except Exception as e:
                             logger.error(f"Error handling job {current_job.id} during shutdown: {str(e)}")
-                
+
                 # Deregister the worker first to prevent new jobs
                 worker.teardown()
                 logger.info(f"Deregistered worker {process.pid} from Redis")
-            
+
             if not os.getenv('PYTEST_CURRENT_TEST'):  # Skip process termination in tests
                 # Terminate the process
                 try:
@@ -161,12 +162,12 @@ async def lifespan(app: FastAPI):
                             psutil.Process(process.pid).kill()
                     except Exception:
                         pass
-                
+
         except Exception as e:
             logger.error(f"Error cleaning up worker {process.pid}: {str(e)}", exc_info=True)
-    
+
     app.state.worker_processes.clear()
-    
+
     # Final verification that all workers are cleaned up from Redis
     try:
         remaining_workers = Worker.all(connection=redis_conn)
@@ -195,6 +196,7 @@ async def lifespan(app: FastAPI):
             logger.warning(f"Quiz {quiz_id} lock released during shutdown")
 
     logger.info("All workers cleaned up")
+
 
 # Initialize FastAPI with lifespan manager
 app = FastAPI(lifespan=lifespan)
@@ -358,13 +360,25 @@ async def generate_guidelines_api(
     logger.info(f"[{trace_id}] Guidelines generation request received for question: {request.question[:100]}...")
 
     try:
-        guidelines_result = await generate_guidelines(
-            llm,
-            question=request.question or "",
-            expected_ans=request.expected_ans or "",
-            total_score=request.total_score or 10
-        )
-        logger.info(f"[{trace_id}] Guidelines generated successfully")
+        errors = []
+        MAX_RETRIES = int(os.getenv('MAX_RETRIES', 10))
+        for attempt in range(MAX_RETRIES):
+            guidelines_result = await generate_guidelines(
+                llm,
+                question=request.question or "",
+                expected_ans=request.expected_ans or "",
+                total_score=request.total_score or 10,
+                errors=errors
+            )
+            if guidelines_result.get("status") != 200:
+                error_msg = guidelines_result.get('error', 'Unknown Error')
+                logger.warning(
+                    f"[{trace_id}] Attempt {attempt + 1}/{MAX_RETRIES}: Failed to generate guidelines for api request {error_msg}")
+                errors.append(error_msg)
+                continue
+            else:
+                logger.info(f"[{trace_id}] Guidelines generated successfully")
+            break
         return guidelines_result
     except InvalidInputError as e:
         logger.error(f"[{trace_id}] Invalid input error: {str(e)}")
@@ -437,16 +451,18 @@ async def evaluate_bulk_queue(
         redis_client = get_redis_client()
         quiz_lock = QuizLock(redis_client, request.quiz_id)
         app.state.quiz_locks[request.quiz_id] = quiz_lock
-        
+
         if quiz_lock.is_locked():
             remaining_time = quiz_lock.get_lock_ttl()
             if request.override_locked:
-                logger.warning(f"[{trace_id}] Quiz {request.quiz_id} is locked with {remaining_time}s remaining. Overriding lock")
+                logger.warning(
+                    f"[{trace_id}] Quiz {request.quiz_id} is locked with {remaining_time}s remaining. Overriding lock")
                 if not quiz_lock.release():
                     logger.warning(f"[{trace_id}] Failed to release lock for quiz {request.quiz_id}")
             else:
 
-                logger.warning(f"[{trace_id}] Quiz {request.quiz_id} is already being evaluated. Remaining time: {remaining_time}s")
+                logger.warning(
+                    f"[{trace_id}] Quiz {request.quiz_id} is already being evaluated. Remaining time: {remaining_time}s")
                 raise HTTPException(
                     status_code=409,
                     detail={
@@ -498,6 +514,7 @@ async def regenerate_quiz_report(quiz_id: str):
         postgres_cursor.close()
         postgres_conn.close()
 
+
 @app.get("/workers/status")
 async def get_workers_status():
     """Get detailed status of all worker processes and queue information"""
@@ -507,20 +524,20 @@ async def get_workers_status():
         # Get worker status with enhanced monitoring
         status = check_workers(app.state.worker_processes)  # Use workers from app state
         active_workers = sum(1 for w in status if w['status'] == 'running')
-        
+
         # Get queue information
         redis_conn = get_redis_client()
         queue = Queue('task_queue', connection=redis_conn)
-        
+
         try:
             # Get jobs from different states with error handling
             queued_jobs = queue.get_jobs() or []
             failed_registry = queue.failed_job_registry
             completed_registry = queue.finished_job_registry
-            
+
             failed_jobs = failed_registry.get_job_ids() if failed_registry else []
             completed_jobs = completed_registry.get_job_ids() if completed_registry else []
-            
+
             # Process job information with error handling
             queue_info = {
                 'queued': [
@@ -535,24 +552,30 @@ async def get_workers_status():
                 'failed': [
                     {
                         'job_id': job_id,
-                        'quiz_id': queue.fetch_job(job_id).args[0] if queue.fetch_job(job_id) and queue.fetch_job(job_id).args else None,
-                        'failed_at': queue.fetch_job(job_id).ended_at.isoformat() if queue.fetch_job(job_id) and queue.fetch_job(job_id).ended_at else None,
+                        'quiz_id': queue.fetch_job(job_id).args[0] if queue.fetch_job(job_id) and queue.fetch_job(
+                            job_id).args else None,
+                        'failed_at': queue.fetch_job(job_id).ended_at.isoformat() if queue.fetch_job(
+                            job_id) and queue.fetch_job(job_id).ended_at else None,
                         'error_message': queue.fetch_job(job_id).exc_info if queue.fetch_job(job_id) else None
                     } for job_id in failed_jobs if job_id
                 ],
                 'completed': [
                     {
                         'job_id': job_id,
-                        'quiz_id': queue.fetch_job(job_id).args[0] if queue.fetch_job(job_id) and queue.fetch_job(job_id).args else None,
-                        'completed_at': queue.fetch_job(job_id).ended_at.isoformat() if queue.fetch_job(job_id) and queue.fetch_job(job_id).ended_at else None,
-                        'duration': (queue.fetch_job(job_id).ended_at - queue.fetch_job(job_id).started_at).total_seconds() if queue.fetch_job(job_id) and queue.fetch_job(job_id).ended_at and queue.fetch_job(job_id).started_at else None
+                        'quiz_id': queue.fetch_job(job_id).args[0] if queue.fetch_job(job_id) and queue.fetch_job(
+                            job_id).args else None,
+                        'completed_at': queue.fetch_job(job_id).ended_at.isoformat() if queue.fetch_job(
+                            job_id) and queue.fetch_job(job_id).ended_at else None,
+                        'duration': (queue.fetch_job(job_id).ended_at - queue.fetch_job(
+                            job_id).started_at).total_seconds() if queue.fetch_job(job_id) and queue.fetch_job(
+                            job_id).ended_at and queue.fetch_job(job_id).started_at else None
                     } for job_id in completed_jobs if job_id
                 ]
             }
         except Exception as e:
             logger.error(f"[{trace_id}] Error processing queue information: {str(e)}", exc_info=True)
             queue_info = {'error': 'Failed to process queue information'}
-        
+
         response = {
             'workers': status,
             'active_workers': active_workers,
@@ -564,10 +587,10 @@ async def get_workers_status():
                 'completed': len(completed_jobs)
             }
         }
-        
+
         logger.info(f"[{trace_id}] Status check complete. {active_workers} active workers")
         return response
-        
+
     except Exception as e:
         logger.error(f"[{trace_id}] Error checking worker and queue status", exc_info=True)
         raise HTTPException(
@@ -577,6 +600,7 @@ async def get_workers_status():
                 'error': str(e)
             }
         )
+
 
 @app.post("/workers/kill/{pid}")
 async def kill_worker(pid: int, spawn_replacement: bool = True):
@@ -623,7 +647,7 @@ async def kill_worker(pid: int, spawn_replacement: bool = True):
 
         # Remove the process from our list
         app.state.worker_processes[:] = [p for p in app.state.worker_processes if p.pid != pid]
-        
+
         # Spawn replacement worker if requested
         new_worker = None
         if spawn_replacement:
@@ -654,6 +678,7 @@ async def kill_worker(pid: int, spawn_replacement: bool = True):
             status_code=500,
             detail=f"Failed to kill worker {pid}: {str(e)}"
         )
+
 
 if __name__ == "__main__":
     import uvicorn

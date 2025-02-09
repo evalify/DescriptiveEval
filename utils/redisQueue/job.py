@@ -1,11 +1,11 @@
-from utils.database import get_postgres_cursor, get_mongo_client, get_redis_client
-from model import get_llm
+import asyncio
+
 from evaluation import bulk_evaluate_quiz_responses
+from model import get_llm
+from utils.database import get_postgres_cursor, get_mongo_client, get_redis_client
 from utils.errors import *
 from utils.logger import logger, QuizLogger
 from utils.redisQueue.lock import QuizLock
-from functools import wraps
-import asyncio
 
 # Group errors by category for cleaner handling
 EVALUATION_ERRORS = {

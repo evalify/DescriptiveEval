@@ -1,9 +1,9 @@
 import os
-import sys
-import socket
-import time
 import signal
-import asyncio
+import socket
+import sys
+import time
+
 import psutil
 
 # Add project root to Python path
@@ -93,6 +93,7 @@ try:
         qlogger = QuizLogger(quiz_id)
         
         # Enhanced success logging
+        #worker.total_jobs_processed += 1 # TODO: Is this correct?
         success_context = {
             'job_id': job.id,
             'quiz_id': quiz_id,
