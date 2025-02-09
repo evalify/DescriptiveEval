@@ -4,6 +4,8 @@ langchain-groq
 python-dotenv
 psycopg2-binary
 pymongo
+mongomock
+fakeredis
 fastapi
 redis
 tqdm

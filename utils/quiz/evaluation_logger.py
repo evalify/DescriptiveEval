@@ -17,8 +17,11 @@ class EvaluationLogger:
         
         # Load existing data if file exists
         if self.log_file.exists():
-            with open(self.log_file, 'r') as f:
-                self.evaluation_data = json.load(f)
+            try:
+                with open(self.log_file, 'r') as f:
+                    self.evaluation_data = json.load(f)
+            except json.JSONDecodeError:
+                pass
     
     def _get_question_answer(self, question_data: Dict[str, Any], question_type: str) -> Union[str, list, None]:
         """Safely extracts the answer based on the question type"""
