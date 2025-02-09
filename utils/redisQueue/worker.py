@@ -31,26 +31,26 @@ worker_name = f"{hostname}.{pid}.{timestamp}"
 class EnhancedWorker(Worker):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.job_start_time = None
-        self.total_jobs_processed = 0
-        self.total_jobs_failed = 0
-        self.last_heartbeat = time.time()
-        self.health_check_interval = 30  # seconds
+        self.custom_job_start_time = None   # Add custom to prevent interference with base class
+        self.custom_total_jobs_processed = 0
+        self.custom_total_jobs_failed = 0
+        self.custom_last_heartbeat = time.time()
+        self.custom_health_check_interval = 30  # seconds
 
     def heartbeat(self, *args, **kwargs):
         """Enhanced heartbeat with health check"""
         current_time = time.time()
-        if current_time - self.last_heartbeat > self.health_check_interval:
+        if current_time - self.custom_last_heartbeat > self.custom_health_check_interval:
             # Log health status
             memory_usage = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024  # MB
             logger.debug(
                 f"Worker {worker_name} health check: "
-                f"Jobs processed: {self.total_jobs_processed}, "
-                f"Failed: {self.total_jobs_failed}, "
+                f"Jobs processed: {self.custom_total_jobs_processed}, "
+                f"Failed: {self.custom_total_jobs_failed}, "
                 f"Memory usage: {memory_usage:.2f}MB"
             )
-        super().heartbeat()
-        self.last_heartbeat = current_time
+        super().heartbeat(*args, **kwargs)
+        self.custom_last_heartbeat = current_time
 
 try:
     redis_conn = get_redis_client()
@@ -60,7 +60,7 @@ try:
     logger.info(f"Worker {worker_name} successfully created")
     
     # Create task queue for callbacks
-    task_queue = Queue('task_queue', connection=redis_conn)
+    # task_queue = Queue('task_queue', connection=redis_conn)
     
     def handle_job_failure(job, *args, **kwargs):
         """Handle job failures"""
@@ -79,7 +79,7 @@ try:
             'quiz_id': quiz_id,
             'error_type': error_type,
             'error_value': error_value,
-            'job_duration': time.time() - worker.job_start_time if worker.job_start_time else None,
+            'job_duration': time.time() - worker.custom_job_start_time if worker.custom_job_start_time else None,
             'memory_usage': psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024  # MB
         }
         
@@ -93,13 +93,13 @@ try:
         qlogger = QuizLogger(quiz_id)
         
         # Enhanced success logging
-        worker.total_jobs_processed += 1
+        worker.custom_total_jobs_processed += 1
         success_context = {
             'job_id': job.id,
             'quiz_id': quiz_id,
-            'job_duration': time.time() - worker.job_start_time if worker.job_start_time else None,
+            'job_duration': time.time() - worker.custom_job_start_time if worker.custom_job_start_time else None,
             'memory_usage': psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024,  # MB
-            'total_jobs_processed': worker.total_jobs_processed
+            'total_jobs_processed': worker.custom_total_jobs_processed
         }
         
         qlogger.info(f"Job {job.id} completed successfully", extra=success_context)

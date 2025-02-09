@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from rq import Queue, Worker
 from rq.job import JobStatus
+from rq.command import send_stop_job_command
 
 from evaluation import bulk_evaluate_quiz_responses, get_quiz_responses, get_all_questions
 from model import LLMProvider, get_llm, score, generate_guidelines, enhance_question_and_answer
@@ -124,14 +125,22 @@ async def lifespan(app: FastAPI):
                     if not current_job.is_finished:
                         logger.warning(f"Cancelling job {current_job.id} on worker {process.pid}")
                         try:
-                            # Reset job state
-                            current_job.set_status(JobStatus.QUEUED)
-                            current_job.worker_name = None
-                            current_job.ended_at = None
-                            current_job.save()
-                            # Requeue the job
-                            app.state.task_queue.enqueue_job(current_job)
-                            logger.info(f"Re-queued job {current_job.id}")
+                            # Cancel job state
+                            try:
+                                send_stop_job_command(redis_conn, current_job.id)
+                            except Exception as e:
+                                logger.error(f"Failed to send stop job command for job {current_job.id}: {str(e)}")
+                            else:
+                                logger.info(f"Cancelled job {current_job.id} on worker {process.pid}")
+                                # Uncomment the following block to requeue the job on shutdown
+                                # Reset job state
+                                # current_job.set_status(JobStatus.QUEUED)
+                                # current_job.worker_name = None
+                                # current_job.ended_at = None
+                                # current_job.save()
+                                # # Requeue the job
+                                # app.state.task_queue.enqueue_job(current_job)
+                                # logger.info(f"Re-queued job {current_job.id}")
                         except Exception as e:
                             logger.error(f"Error handling job {current_job.id} during shutdown: {str(e)}")
 
@@ -601,6 +610,38 @@ async def get_workers_status():
             }
         )
 
+@app.post("/jobs/stop/{quiz_id}")
+async def stop_jobs(quiz_id: str):
+    """Stop all jobs for a specific quiz ID"""
+    trace_id = uuid.uuid4()
+    logger.info(f"[{trace_id}] Stopping all jobs for quiz ID: {quiz_id}")
+
+    try:
+        redis_conn = get_redis_client()
+        workers = Worker.all(connection=redis_conn)
+        for worker in workers:
+            current_job = worker.get_current_job()
+            if current_job and current_job.args and current_job.args[0] == quiz_id:
+                logger.info(f"[{trace_id}] Cancelling job {current_job.id} on worker {worker.name}")
+                try:
+                    send_stop_job_command(redis_conn, current_job.id)
+                except Exception as e:
+                    logger.error(f"Failed to send stop job command for job {current_job.id}: {str(e)}")
+                finally:
+                    current_job.cancel()
+                    current_job.save()
+
+        return {"message": f"Stopped all jobs for quiz ID: {quiz_id}"}
+    except Exception as e:
+        logger.error(f"[{trace_id}] Error stopping jobs for quiz ID: {quiz_id}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                'message': f"Failed to stop jobs for quiz ID: {quiz_id}",
+                'error': str(e)
+            }
+        )
+
 
 @app.post("/workers/kill/{pid}")
 async def kill_worker(pid: int, spawn_replacement: bool = True):
@@ -630,16 +671,19 @@ async def kill_worker(pid: int, spawn_replacement: bool = True):
             current_job = worker.get_current_job()
             if current_job:
                 logger.warning(f"[{trace_id}] Cancelling job {current_job.id} on worker {pid}")
+                send_stop_job_command(redis_conn, current_job.id)
                 current_job.cancel()
                 current_job.save()
 
             # Deregister the worker
             worker.teardown()
             logger.info(f"[{trace_id}] Deregistered worker {pid} from Redis")
+        else:
+            logger.warning(f"[{trace_id}] Worker {pid} not found in Redis")
 
-        # Kill the process
+        # Kill the worker process
         if process.is_running():
-            process.terminate()
+            process.terminate() # TODO: Check if Work Horse is terminated!
             try:
                 process.wait(timeout=3)
             except psutil.TimeoutExpired:
