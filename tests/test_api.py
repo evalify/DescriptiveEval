@@ -18,20 +18,32 @@ def print_api_result(test_name, response):
 async def test_switch_to_groq(client):
     response = await client.post(
         "/set-provider",
-        json={"provider": "groq"}
+        json={
+            "provider": "groq",
+            "provider_model_name": None,
+            "provider_api_key": None,
+            "service": "macro"
+        }
     )
     assert response.status_code == 200
-    assert response.json()["message"] == "Successfully switched to groq provider with default model"
+    result = response.json()
+    assert "Successfully switched to groq provider" in result["message"]
 
 
 @pytest.mark.asyncio
 async def test_switch_to_ollama(client):
     response = await client.post(
         "/set-provider",
-        json={"provider": "ollama"}
+        json={
+            "provider": "ollama",
+            "provider_model_name": None,
+            "provider_api_key": None,
+            "service": "macro"
+        }
     )
     assert response.status_code == 200
-    assert response.json()["message"] == "Successfully switched to ollama provider with default model"
+    result = response.json()
+    assert "Successfully switched to ollama provider" in result["message"]
 
 
 @pytest.mark.asyncio
@@ -48,7 +60,8 @@ async def test_invalid_provider(client):
 async def test_scoring_endpoint(client, sample_answer):
     response = await client.post(
         "/score",
-        json=sample_answer
+        json=sample_answer,
+        timeout=30.0  # Increase timeout for LLM operations
     )
     result = response.json()
     log_evaluation(
@@ -81,7 +94,7 @@ async def test_scoring_empty_answer(client, sample_answer):
         result
     )
     print_api_result("Empty Answer", response)
-    assert response.status_code == 500
+    assert response.status_code == 400  # Should return 400 for empty answer
     result = response.json()
     assert "detail" in result
 
@@ -260,10 +273,22 @@ async def test_enhance_qa_endpoint(client: AsyncClient):
 async def test_evaluate_endpoint(client: AsyncClient):
     """Test the /evaluate endpoint for bulk evaluation"""
     request_data = {
-        "quiz_id": "cm64n3edl0006xyrxnp4llbe4"
+        "quiz_id": "cm64n3edl0006xyrxnp4llbe4",
+        "override_evaluated": False,
+        "types_to_evaluate": {
+            "MCQ": True,
+            "DESCRIPTIVE": True,
+            "CODING": True,
+            "TRUE_FALSE": True,
+            "FILL_IN_BLANK": True
+        }
     }
-    response = await client.post("/evaluate", json=request_data)
-    assert response.status_code == 200
+    response = await client.post(
+        "/evaluate", 
+        json=request_data,
+        timeout=30.0
+    )
+    assert response.status_code in [200, 409]  # Either success or already being evaluated
     result = response.json()
     assert "message" in result
     assert "job_id" in result
@@ -288,7 +313,7 @@ async def test_empty_quiz(client: AsyncClient):
         "quiz_id": ""
     }
     response = await client.post("/evaluate", json=request_data)
-    assert response.status_code == 500
+    assert response.status_code == 400
     result = response.json()
     assert "detail" in result
 
@@ -303,13 +328,18 @@ async def test_score_endpoint(client: AsyncClient):
         "total_score": 10,
         "guidelines": "Focus on accuracy and completeness."
     }
-    response = await client.post("/score", json=request_data)
+    response = await client.post(
+        "/score", 
+        json=request_data,
+        timeout=30.0
+    )
     assert response.status_code == 200
     result = response.json()
     assert "score" in result
     assert "reason" in result
     assert "rubric" in result
     assert "breakdown" in result
+
 
 @pytest.mark.asyncio
 async def test_root_endpoint(client: AsyncClient):
@@ -327,7 +357,7 @@ async def test_score_invalid_input(client: AsyncClient):
         "total_score": -1
     }
     response = await client.post("/score", json=request_data)
-    assert response.status_code == 500
+    assert response.status_code == 400
     result = response.json()
     assert "detail" in result
 

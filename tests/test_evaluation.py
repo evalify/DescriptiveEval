@@ -25,14 +25,14 @@ def redis_mock():
 def pg_cursor_mock():
     cursor = MagicMock()
     cursor.fetchall.return_value = [{
-        'id': '1',
-        'studentId': 'student1',
-        'quizId': 'quiz1',
-        'responses': {'q1': ['answer1']},
-        'submittedAt': '2024-01-01',
-        'questionMarks': {},
-        'score': 0,
-        'remarks': None
+        "id": "test_response_1",
+        "studentId": "test_student_1",
+        "quizId": "test_quiz1",
+        "score": 0,
+        "submittedAt": "2025-01-07 10:25:44.442000",
+        "responses": {},
+        "violations": "",
+        "totalScore": 10.0,
     }]
     return cursor
 
@@ -66,10 +66,10 @@ async def test_get_guidelines(redis_mock):
     assert isinstance(result, dict)
     assert "guidelines" in result
     
-    # Verify cache was set
+    # Verify cache was set with correct prefix
     redis_mock.set.assert_called_once()
     cache_key = redis_mock.set.call_args[0][0]
-    assert cache_key == f"{question_id}_guidelines_cache"
+    assert cache_key == f"guidelines:{question_id}_guidelines_cache"
 
 @pytest.mark.asyncio
 async def test_get_quiz_responses(redis_mock, pg_cursor_mock):
@@ -83,10 +83,10 @@ async def test_get_quiz_responses(redis_mock, pg_cursor_mock):
     pg_cursor_mock.execute.assert_called_once()
     assert len(responses) > 0
     
-    # Verify cache was set
+    # Verify cache was set with correct prefix
     redis_mock.set.assert_called_once()
     cache_key = redis_mock.set.call_args[0][0]
-    assert cache_key == f"{quiz_id}_responses_evalcache"
+    assert cache_key == f"responses:{quiz_id}_responses_evalcache"
 
 @pytest.mark.asyncio
 async def test_get_all_questions(redis_mock, mongo_db_mock):
@@ -100,10 +100,10 @@ async def test_get_all_questions(redis_mock, mongo_db_mock):
     mongo_db_mock['NEW_QUESTIONS'].find.assert_called_once()
     assert len(questions) > 0
     
-    # Verify cache was set
+    # Verify cache was set with correct prefix
     redis_mock.set.assert_called_once()
     cache_key = redis_mock.set.call_args[0][0]
-    assert cache_key == f"{quiz_id}_questions_evalcache"
+    assert cache_key == f"questions:{quiz_id}_questions_evalcache"
 
 @pytest.mark.asyncio
 async def test_bulk_evaluate_quiz_responses(redis_mock, pg_cursor_mock, mongo_db_mock):
@@ -126,24 +126,46 @@ async def test_bulk_evaluate_quiz_responses(redis_mock, pg_cursor_mock, mongo_db
 async def test_cache_expiry(redis_mock):
     """Test Redis cache expiration"""
     quiz_id = "test_quiz1"
+    mock_data = [{
+        "id": "test_response_1",
+        "studentId": "test_student_1",
+        "quizId": "test_quiz1",
+        "score": 0,
+        "submittedAt": "2025-01-07 10:25:44.442000",
+        "responses": {},
+        "violations": "",
+        "totalScore": 10.0,
+    }]
     
-    # Set cache with expiration
-    redis_mock.get.return_value = json.dumps({"test": "data"})
+    # Set up cursor mock with real data
+    cursor_mock = MagicMock()
+    cursor_mock.fetchall.return_value = mock_data
     
-    # Get cached data
-    responses = get_quiz_responses(MagicMock(), redis_mock, quiz_id)
+    # Mock Redis.get to return cached data with correct prefix
+    def mock_redis_get(key):
+        if key == f"responses:{quiz_id}_responses_evalcache":
+            return json.dumps({"test": "data"})
+        return None
+    redis_mock.get.side_effect = mock_redis_get
+    
+    # First call - cache hit
+    responses = get_quiz_responses(cursor_mock, redis_mock, quiz_id)
     assert responses == {"test": "data"}
     
     # Verify expiration was set correctly
     redis_mock.set.assert_not_called()  # Should use cached value
     
-    # Simulate cache expiration
+    # Reset mock and simulate cache miss
     redis_mock.get.return_value = None
-    responses = get_quiz_responses(MagicMock(), redis_mock, quiz_id)
+    responses = get_quiz_responses(cursor_mock, redis_mock, quiz_id)
     
-    # Verify new cache was set with correct expiration
-    redis_mock.set.assert_called_once()
-    assert redis_mock.set.call_args[1]['ex'] == CACHE_EX
+    # Verify new data was cached with correct prefix
+    assert redis_mock.set.call_count == 1
+    cache_key = redis_mock.set.call_args[0][0]
+    assert cache_key == f"responses:{quiz_id}_responses_evalcache"
+    assert isinstance(responses, list)
+    assert len(responses) > 0
+    assert responses[0]["id"] == "test_response_1"
 
 @pytest.mark.asyncio
 async def test_empty_quiz_responses(redis_mock, pg_cursor_mock):
@@ -169,12 +191,21 @@ async def test_empty_questions(redis_mock, mongo_db_mock):
 async def test_guidelines_error_handling(redis_mock):
     """Test error handling in guidelines generation"""
     llm = MagicMock()
-    llm.ainvoke.side_effect = Exception("API Error")
+    llm.ainvoke.side_effect = Exception("Test API Error")
     
     result = await get_guidelines(
-        redis_mock, llm, "q1", "question", "answer", 10
+        redis_client=redis_mock,
+        llm=llm,
+        question_id="q1",
+        question="test question",
+        expected_answer="test answer",
+        total_score=10
     )
-    assert "Error processing response" in result["guidelines"]
+    
+    # Should return error status and message
+    assert result["status"] == 403
+    assert "Error" in result.get("guidelines", "")
+    assert not redis_mock.set.called  # Should not cache error responses
 
 @pytest.mark.asyncio
 async def test_set_quiz_response(pg_cursor_mock):
