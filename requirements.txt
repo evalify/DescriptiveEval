@@ -15,4 +15,5 @@ psutil
 colorlog
 deprecated
 uvicorn
+pytest
 pytest-asyncio

@@ -4,6 +4,7 @@ import socket
 import time
 import signal
 import asyncio
+import psutil
 
 # Add project root to Python path
 project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -27,11 +28,35 @@ pid = os.getpid()
 timestamp = int(time.time())
 worker_name = f"{hostname}.{pid}.{timestamp}"
 
+class EnhancedWorker(Worker):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.job_start_time = None
+        self.total_jobs_processed = 0
+        self.total_jobs_failed = 0
+        self.last_heartbeat = time.time()
+        self.health_check_interval = 30  # seconds
+
+    def heartbeat(self, *args, **kwargs):
+        """Enhanced heartbeat with health check"""
+        current_time = time.time()
+        if current_time - self.last_heartbeat > self.health_check_interval:
+            # Log health status
+            memory_usage = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024  # MB
+            logger.info(
+                f"Worker {worker_name} health check: "
+                f"Jobs processed: {self.total_jobs_processed}, "
+                f"Failed: {self.total_jobs_failed}, "
+                f"Memory usage: {memory_usage:.2f}MB"
+            )
+        super().heartbeat()
+        self.last_heartbeat = current_time
+
 try:
     redis_conn = get_redis_client()
     logger.info(f"Worker {worker_name} initializing with Redis connection")
     
-    worker = Worker(['task_queue'], connection=redis_conn, name=worker_name, worker_ttl=int(os.getenv('WORKER_TTL', 3600)))
+    worker = EnhancedWorker(['task_queue'], connection=redis_conn, name=worker_name, worker_ttl=int(os.getenv('WORKER_TTL', 3600)))
     logger.info(f"Worker {worker_name} successfully created")
     
     # Create task queue for callbacks
@@ -47,18 +72,39 @@ try:
         qlogger = QuizLogger(quiz_id)
         error_type = kwargs.get('exc_type').__name__ if kwargs.get('exc_type') else 'Unknown'
         error_value = str(kwargs.get('exc_value')) if kwargs.get('exc_value') else 'No details'
-        qlogger.error(f"Job {job.id} failed with error: {error_type}: {error_value}")
-        logger.error(f"Worker {worker_name}: Job {job.id} failed", exc_info=True)
+        
+        # Enhanced error logging
+        error_context = {
+            'job_id': job.id,
+            'quiz_id': quiz_id,
+            'error_type': error_type,
+            'error_value': error_value,
+            'job_duration': time.time() - worker.job_start_time if worker.job_start_time else None,
+            'memory_usage': psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024  # MB
+        }
+        
+        qlogger.error(f"Job {job.id} failed", extra=error_context)
+        logger.error(f"Worker {worker_name}: Job {job.id} failed", extra=error_context)
         return True  # Retry other types of failures
 
     def handle_job_success(job, queue, started_job_registry):
         """Handle successful job completion"""
         quiz_id = job.args[0] if job.args else "unknown"
         qlogger = QuizLogger(quiz_id)
-        qlogger.info(f"Job {job.id} completed successfully")
-        logger.info(f"Worker {worker_name}: Job {job.id} completed")
+        
+        # Enhanced success logging
+        success_context = {
+            'job_id': job.id,
+            'quiz_id': quiz_id,
+            'job_duration': time.time() - worker.job_start_time if worker.job_start_time else None,
+            'memory_usage': psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024,  # MB
+            'total_jobs_processed': worker.total_jobs_processed
+        }
+        
+        qlogger.info(f"Job {job.id} completed successfully", extra=success_context)
+        logger.info(f"Worker {worker_name}: Job {job.id} completed", extra=success_context)
 
-    # Register handlers using RQ's callback mechanism
+    # Register handlers
     worker.push_exc_handler(handle_job_failure)
     worker.success_handler = handle_job_success
     

@@ -2,7 +2,8 @@ import os
 import time
 import uuid
 from typing import Optional
-
+from contextlib import asynccontextmanager
+import asyncio
 import deprecated
 import psutil
 from fastapi import FastAPI, Depends, Request, HTTPException
@@ -11,6 +12,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from rq import Queue, Worker
+from rq.job import JobStatus
 
 from evaluation import bulk_evaluate_quiz_responses, get_quiz_responses, get_all_questions
 from model import LLMProvider, get_llm, score, generate_guidelines, enhance_question_and_answer
@@ -22,12 +24,181 @@ from utils.redisQueue.wakeup_workers import spawn_workers, check_workers
 from utils.errors import InvalidProviderError, InvalidInputError, EmptyAnswerError, InvalidQuizIDError
 from utils.redisQueue.lock import QuizLock
 
-app = FastAPI()
-logger.info("Initializing FastAPI application")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    redis_conn = get_redis_client()
 
-# Initialize workers when app starts
-worker_processes = spawn_workers()
-logger.info(f"Initialized {len(worker_processes)} worker processes")
+    # Startup: Initialize workers
+    try:
+        # Initialize quiz locks
+        app.state.quiz_locks = {}
+
+        # Check if we're in test environment
+        is_test = bool(os.getenv('PYTEST_CURRENT_TEST'))
+        
+        if not is_test:
+            # Clean up any stale workers first
+            stale_workers = Worker.all(connection=redis_conn)
+            for w in stale_workers:
+                try:
+                    worker_pid = int(w.name.split('.')[1]) if len(w.name.split('.')) > 1 else None
+                    if worker_pid and not psutil.pid_exists(worker_pid):
+                        # Get current job before cleanup
+                        current_job = w.get_current_job()
+                        if current_job and not current_job.is_finished:
+                            # Requeue the job
+                            current_job.set_status(JobStatus.QUEUED)
+                            current_job.worker_name = None
+                            current_job.save()
+                        w.teardown()
+                        logger.info(f"Cleaned up stale worker {w.name}")
+                except (IndexError, ValueError, psutil.NoSuchProcess):
+                    continue
+            
+            app.state.worker_processes = spawn_workers()
+            
+            # Verify workers registered correctly
+            timeout = time.time() + 30  # 30 seconds timeout
+            while time.time() < timeout:
+                registered_workers = Worker.all(connection=redis_conn)
+                registered_pids = {
+                    int(w.name.split('.')[1]) 
+                    for w in registered_workers 
+                    if len(w.name.split('.')) > 1 and w.name.split('.')[1].isdigit()
+                }
+                spawned_pids = {p.pid for p in app.state.worker_processes}
+                
+                if registered_pids >= spawned_pids:
+                    break
+                await asyncio.sleep(1)
+            
+            logger.info(f"Initialized {len(app.state.worker_processes)} worker processes during startup")
+        else:
+            # In test environment, use mock workers from app state if they exist
+            app.state.worker_processes = getattr(app.state, 'worker_processes', [])
+            if len(app.state.worker_processes) < 1:
+                app.state.worker_processes = spawn_workers()
+                await asyncio.sleep(5)  # Wait for workers to start asynchronously
+            logger.info(f"Test environment: Initialized {len(app.state.worker_processes)} mock workers")
+            logger.info(f"Test environment: Using {len(app.state.worker_processes)} mock workers")
+        
+        # Add Redis queue to app state for easy access
+        app.state.task_queue = Queue('task_queue', connection=redis_conn)
+        
+    except Exception as e:
+        logger.critical("Failed to initialize workers during startup", exc_info=True)
+        app.state.worker_processes = []
+        app.state.task_queue = Queue('task_queue', connection=redis_conn)
+
+    
+    yield
+    
+    # Shutdown: Cleanup workers
+    logger.info("Application shutdown: Cleaning up workers...")
+    
+    # Get all active jobs first
+    active_jobs = {}
+    for process in app.state.worker_processes:
+        try:
+            workers = Worker.all(connection=redis_conn)
+            worker = next((w for w in workers if str(process.pid) in w.name), None)
+            if worker:
+                current_job = worker.get_current_job()
+                if current_job:
+                    active_jobs[worker.name] = current_job
+        except Exception as e:
+            logger.error(f"Error getting job for worker {process.pid}: {str(e)}")
+    
+    # Now clean up workers
+    for process in app.state.worker_processes:
+        try:
+            # Get the worker from Redis
+            workers = Worker.all(connection=redis_conn)
+            worker = next((w for w in workers if str(process.pid) in w.name), None)
+            
+            if worker:
+                # Handle any current job
+                if worker.name in active_jobs:
+                    current_job = active_jobs[worker.name]
+                    if not current_job.is_finished:
+                        logger.warning(f"Cancelling job {current_job.id} on worker {process.pid}")
+                        try:
+                            # Reset job state
+                            current_job.set_status(JobStatus.QUEUED)
+                            current_job.worker_name = None
+                            current_job.ended_at = None
+                            current_job.save()
+                            # Requeue the job
+                            app.state.task_queue.enqueue_job(current_job)
+                            logger.info(f"Re-queued job {current_job.id}")
+                        except Exception as e:
+                            logger.error(f"Error handling job {current_job.id} during shutdown: {str(e)}")
+                
+                # Deregister the worker first to prevent new jobs
+                worker.teardown()
+                logger.info(f"Deregistered worker {process.pid} from Redis")
+            
+            if not os.getenv('PYTEST_CURRENT_TEST'):  # Skip process termination in tests
+                # Terminate the process
+                try:
+                    if psutil.pid_exists(process.pid):
+                        proc = psutil.Process(process.pid)
+                        if proc.is_running():
+                            proc.terminate()
+                            try:
+                                proc.wait(timeout=3)
+                            except psutil.TimeoutExpired:
+                                proc.kill()
+                                proc.wait(timeout=2)
+                    logger.info(f"Successfully terminated worker {process.pid}")
+                except (psutil.NoSuchProcess, psutil.AccessDenied) as e:
+                    logger.warning(f"Process {process.pid} already terminated: {str(e)}")
+                except Exception as e:
+                    logger.error(f"Error terminating process {process.pid}: {str(e)}")
+                    # Try force kill as last resort
+                    try:
+                        if psutil.pid_exists(process.pid):
+                            psutil.Process(process.pid).kill()
+                    except Exception:
+                        pass
+                
+        except Exception as e:
+            logger.error(f"Error cleaning up worker {process.pid}: {str(e)}", exc_info=True)
+    
+    app.state.worker_processes.clear()
+    
+    # Final verification that all workers are cleaned up from Redis
+    try:
+        remaining_workers = Worker.all(connection=redis_conn)
+        for w in remaining_workers:
+            try:
+                pid = w.name.split('.')[1] if len(w.name.split('.')) > 1 else None
+                if pid and pid.isdigit() and any(str(pid) in p.name for p in app.state.worker_processes):
+                    # Final check for any jobs before unregistering
+                    current_job = w.get_current_job()
+                    if current_job and not current_job.is_finished:
+                        current_job.set_status(JobStatus.QUEUED)
+                        current_job.worker_name = None
+                        current_job.ended_at = None
+                        current_job.save()
+                        app.state.task_queue.enqueue_job(current_job)
+                    w.teardown()
+            except (IndexError, ValueError):
+                continue
+    except Exception as e:
+        logger.error(f"Error during final worker cleanup: {str(e)}")
+
+    # Unlock any remaining quiz locks
+    for quiz_id, quiz_lock in app.state.quiz_locks.items():
+        if quiz_lock.is_locked():
+            quiz_lock.release()
+            logger.warning(f"Quiz {quiz_id} lock released during shutdown")
+
+    logger.info("All workers cleaned up")
+
+# Initialize FastAPI with lifespan manager
+app = FastAPI(lifespan=lifespan)
+logger.info("Initializing FastAPI application")
 
 # Store current provider in app state
 app.state.current_provider = LLMProvider.OLLAMA
@@ -94,6 +265,7 @@ class QAEnhancementRequest(BaseModel):
 class EvalRequest(BaseModel):
     quiz_id: str
     override_evaluated: bool = False
+    override_locked: bool = False
     types_to_evaluate: Optional[dict] = Field(
         default_factory=lambda: {
             'MCQ': True,
@@ -223,7 +395,7 @@ async def enhance_qa(
 
 
 @deprecated.deprecated(reason="Use /evaluate instead")
-@app.post("/evaluate-wo-queue")  # TODO: Implement Queueing
+@app.post("/evaluate-wo-queue")
 async def evaluate_bulk(
         request: EvalRequest,
         llm=Depends(get_llm_dependency)
@@ -241,7 +413,7 @@ async def evaluate_bulk(
             save_to_file=True,
             llm=llm
         )
-        return {"message": "Evaluation complete", "results": results}  # TODO: Give more detailed response
+        return {"message": "Evaluation complete", "results": results}
     except InvalidQuizIDError as e:
         logger.error(f"Invalid quiz ID error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -251,35 +423,6 @@ async def evaluate_bulk(
     finally:
         postgres_cursor.close()
         postgres_conn.close()
-
-
-@app.get("/queued-quizzes") 
-async def get_queued_quizzes():
-    """Get all currently queued quiz evaluation jobs."""
-    trace_id = uuid.uuid4()
-    logger.info(f"[{trace_id}] Fetching queued quiz evaluations")
-    
-    try:
-        queued_jobs = tasks_queue.get_jobs()
-        queued_quizzes = []
-        for job in queued_jobs:
-            quiz_id = job.args[0] if job.args else None
-            queued_quizzes.append({
-                "job_id": job.id,
-                "quiz_id": quiz_id,
-                "enqueued_at": job.enqueued_at.isoformat() if job.enqueued_at else None,
-                "status": job.get_status()
-            })
-        
-        logger.info(f"[{trace_id}] Found {len(queued_quizzes)} queued quiz evaluations")
-        return {"queued_quizzes": queued_quizzes}
-        
-    except Exception as e:
-        logger.error(f"[{trace_id}] Error fetching queued quizzes", exc_info=True)
-        raise HTTPException(
-            status_code=500,
-            detail=f"Failed to fetch queued quizzes: {str(e)}"
-        )
 
 
 @app.post("/evaluate")
@@ -293,17 +436,24 @@ async def evaluate_bulk_queue(
         # Check if quiz is already being evaluated
         redis_client = get_redis_client()
         quiz_lock = QuizLock(redis_client, request.quiz_id)
+        app.state.quiz_locks[request.quiz_id] = quiz_lock
         
         if quiz_lock.is_locked():
             remaining_time = quiz_lock.get_lock_ttl()
-            logger.warning(f"[{trace_id}] Quiz {request.quiz_id} is already being evaluated. Remaining time: {remaining_time}s")
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "message": f"Quiz {request.quiz_id} is already being evaluated",
-                    "remaining_time": remaining_time
-                }
-            )
+            if request.override_locked:
+                logger.warning(f"[{trace_id}] Quiz {request.quiz_id} is locked with {remaining_time}s remaining. Overriding lock")
+                if not quiz_lock.release():
+                    logger.warning(f"[{trace_id}] Failed to release lock for quiz {request.quiz_id}")
+            else:
+
+                logger.warning(f"[{trace_id}] Quiz {request.quiz_id} is already being evaluated. Remaining time: {remaining_time}s")
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "message": f"Quiz {request.quiz_id} is already being evaluated",
+                        "remaining_time": remaining_time
+                    }
+                )
 
         job = tasks_queue.enqueue(
             rq_job.evaluation_job,
@@ -317,6 +467,9 @@ async def evaluate_bulk_queue(
         )
         logger.info(f"[{trace_id}] Successfully queued evaluation job. Job ID: {job.id}")
         return {"message": "Evaluation queued", "job_id": job.id}
+    except HTTPException as e:
+        logger.error(f"[{trace_id}] HTTP Exception: {str(e)}")
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
     except Exception as e:
         logger.error(f"[{trace_id}] Failed to queue evaluation", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -332,7 +485,7 @@ async def regenerate_quiz_report(quiz_id: str):
         response = get_quiz_responses(postgres_cursor, redis_client, quiz_id)
         questions = get_all_questions(mongo_db, redis_client, quiz_id)
         report = await generate_quiz_report(quiz_id, response, questions)
-        save_quiz_report(quiz_id, report, postgres_cursor, postgres_conn, save_to_file=True)
+        await save_quiz_report(quiz_id, report, postgres_cursor, postgres_conn, save_to_file=True)
         logger.info(f"Quiz report regenerated successfully for quiz_id: {quiz_id}")
         return {"message": "Quiz report regenerated successfully"}
     except InvalidQuizIDError as e:
@@ -347,28 +500,93 @@ async def regenerate_quiz_report(quiz_id: str):
 
 @app.get("/workers/status")
 async def get_workers_status():
-    """Get the status of all worker processes"""
+    """Get detailed status of all worker processes and queue information"""
     trace_id = uuid.uuid4()
-    logger.debug(f"[{trace_id}] Checking worker status")
+    logger.debug(f"[{trace_id}] Checking worker and queue status")
     try:
-        status = check_workers(worker_processes)  # Direct call, not async
+        # Get worker status with enhanced monitoring
+        status = check_workers(app.state.worker_processes)  # Use workers from app state
         active_workers = sum(1 for w in status if w['status'] == 'running')
-        logger.info(f"[{trace_id}] Worker status check complete. {active_workers} active workers")
-        return status
+        
+        # Get queue information
+        redis_conn = get_redis_client()
+        queue = Queue('task_queue', connection=redis_conn)
+        
+        try:
+            # Get jobs from different states with error handling
+            queued_jobs = queue.get_jobs() or []
+            failed_registry = queue.failed_job_registry
+            completed_registry = queue.finished_job_registry
+            
+            failed_jobs = failed_registry.get_job_ids() if failed_registry else []
+            completed_jobs = completed_registry.get_job_ids() if completed_registry else []
+            
+            # Process job information with error handling
+            queue_info = {
+                'queued': [
+                    {
+                        'job_id': job.id,
+                        'quiz_id': job.args[0] if job.args else None,
+                        'enqueued_at': job.enqueued_at.isoformat() if job.enqueued_at else None,
+                        'status': job.get_status(),
+                        'worker_pid': job.worker_name.split('.')[1] if job.worker_name else None
+                    } for job in queued_jobs if job
+                ],
+                'failed': [
+                    {
+                        'job_id': job_id,
+                        'quiz_id': queue.fetch_job(job_id).args[0] if queue.fetch_job(job_id) and queue.fetch_job(job_id).args else None,
+                        'failed_at': queue.fetch_job(job_id).ended_at.isoformat() if queue.fetch_job(job_id) and queue.fetch_job(job_id).ended_at else None,
+                        'error_message': queue.fetch_job(job_id).exc_info if queue.fetch_job(job_id) else None
+                    } for job_id in failed_jobs if job_id
+                ],
+                'completed': [
+                    {
+                        'job_id': job_id,
+                        'quiz_id': queue.fetch_job(job_id).args[0] if queue.fetch_job(job_id) and queue.fetch_job(job_id).args else None,
+                        'completed_at': queue.fetch_job(job_id).ended_at.isoformat() if queue.fetch_job(job_id) and queue.fetch_job(job_id).ended_at else None,
+                        'duration': (queue.fetch_job(job_id).ended_at - queue.fetch_job(job_id).started_at).total_seconds() if queue.fetch_job(job_id) and queue.fetch_job(job_id).ended_at and queue.fetch_job(job_id).started_at else None
+                    } for job_id in completed_jobs if job_id
+                ]
+            }
+        except Exception as e:
+            logger.error(f"[{trace_id}] Error processing queue information: {str(e)}", exc_info=True)
+            queue_info = {'error': 'Failed to process queue information'}
+        
+        response = {
+            'workers': status,
+            'active_workers': active_workers,
+            'total_workers': len(app.state.worker_processes),
+            'queue_info': queue_info,
+            'jobs_summary': {
+                'queued': len(queued_jobs),
+                'failed': len(failed_jobs),
+                'completed': len(completed_jobs)
+            }
+        }
+        
+        logger.info(f"[{trace_id}] Status check complete. {active_workers} active workers")
+        return response
+        
     except Exception as e:
-        logger.error(f"[{trace_id}] Error checking worker status", exc_info=True)
-        raise HTTPException(status_code=500, detail="Internal server error")
-
+        logger.error(f"[{trace_id}] Error checking worker and queue status", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={
+                'message': "Internal server error while checking worker status",
+                'error': str(e)
+            }
+        )
 
 @app.post("/workers/kill/{pid}")
-async def kill_worker(pid: int):
-    """Force quit a specific worker process by PID."""
+async def kill_worker(pid: int, spawn_replacement: bool = True):
+    """Force quit a specific worker process by PID with optional replacement."""
     trace_id = uuid.uuid4()
     logger.info(f"[{trace_id}] Attempting to kill worker with PID: {pid}")
 
     try:
         # Verify the PID belongs to one of our workers
-        worker_pids = [p.pid for p in worker_processes]
+        worker_pids = [p.pid for p in app.state.worker_processes]  # Use workers from app state
         if pid not in worker_pids:
             raise HTTPException(
                 status_code=404,
@@ -392,78 +610,50 @@ async def kill_worker(pid: int):
                 current_job.save()
 
             # Deregister the worker
-            worker.register_death()
+            worker.teardown()
             logger.info(f"[{trace_id}] Deregistered worker {pid} from Redis")
 
-        # Verify it's actually our worker python process
-        if not process.name().lower().startswith('python'):
-            raise HTTPException(
-                status_code=400,
-                detail=f"Process {pid} is not a Python worker process"
-            )
-
-        # Kill the process and its children
-        children = process.children(recursive=True)
-        for child in children:
+        # Kill the process
+        if process.is_running():
+            process.terminate()
             try:
-                child.kill()
-            except psutil.NoSuchProcess:
-                pass
+                process.wait(timeout=3)
+            except psutil.TimeoutExpired:
+                process.kill()
 
-        # Try graceful termination first
-        process.terminate()
+        # Remove the process from our list
+        app.state.worker_processes[:] = [p for p in app.state.worker_processes if p.pid != pid]
+        
+        # Spawn replacement worker if requested
+        new_worker = None
+        if spawn_replacement:
+            try:
+                new_process = spawn_workers(1)[0]
+                app.state.worker_processes.append(new_process)
+                new_worker = {
+                    'pid': new_process.pid,
+                    'status': 'spawned'
+                }
+                logger.info(f"[{trace_id}] Spawned replacement worker with PID: {new_process.pid}")
+            except Exception as e:
+                logger.error(f"[{trace_id}] Failed to spawn replacement worker", exc_info=True)
+                new_worker = {'status': 'spawn_failed', 'error': str(e)}
 
-        try:
-            process.wait(timeout=3)  # Reduced timeout since we're being more aggressive
-        except psutil.TimeoutExpired:
-            logger.warning(f"[{trace_id}] Worker {pid} did not terminate gracefully, forcing kill")
-            process.kill()
-
-        # Ensure the process is dead
-        max_wait = 5
-        start_time = time.time()
-        while time.time() - start_time < max_wait:
-            if not psutil.pid_exists(pid):
-                break
-            time.sleep(0.1)
-        else:
-            raise HTTPException(
-                status_code=500,
-                detail=f"Failed to terminate worker {pid} after {max_wait} seconds"
-            )
-
-        logger.info(f"[{trace_id}] Successfully terminated worker {pid}")
-
-        # Get updated worker status
-        time.sleep(0.5)  # Short delay to let system update
-        status_info = check_workers(worker_processes)  # Direct call, not async
+        # Get updated status
+        status_info = check_workers(app.state.worker_processes)
 
         return {
             "message": f"Worker {pid} terminated successfully",
+            "replacement_worker": new_worker,
             "workers": status_info
         }
 
-    except psutil.NoSuchProcess:
-        logger.error(f"[{trace_id}] Worker {pid} not found")
-        raise HTTPException(
-            status_code=404,
-            detail=f"Worker process {pid} not found"
-        )
-    except psutil.AccessDenied:
-        logger.error(f"[{trace_id}] Access denied when trying to kill worker {pid}")
-        raise HTTPException(
-            status_code=403,
-            detail=f"Access denied when trying to kill worker {pid}"
-        )
-    except HTTPException:
-        raise
     except Exception as e:
         logger.error(f"[{trace_id}] Error killing worker {pid}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail=f"Failed to kill worker {pid}: {str(e)}"
         )
-
 
 if __name__ == "__main__":
     import uvicorn
