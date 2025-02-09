@@ -69,7 +69,7 @@ async def get_guidelines(redis_client: Redis, llm, question_id: str, question: s
         # f"Failed to generate guidelines after {MAX_RETRIES} attempts.\nErrors encountered:\n{error_details}")
         logger.warning(f"Failed to generate guidelines for question {question_id} after {MAX_RETRIES} attempts.\n")
     else:
-        await redis_client.set(f'guidelines:{question_id}_guidelines_cache', json.dumps(guidelines), ex=86400)
+        redis_client.set(f'guidelines:{question_id}_guidelines_cache', json.dumps(guidelines), ex=86400)
         logger.info(f"Successfully generated and cached guidelines for question {question_id}")
     return guidelines
 

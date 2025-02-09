@@ -62,11 +62,15 @@ def test_kill_and_replace_worker(test_client):
     # Kill worker without replacement
     response = test_client.post(f"/workers/kill/{initial_worker['pid']}?spawn_replacement=false")
     assert response.status_code == 200
-    time.sleep(1)  # Give time for worker to terminate
-
-    # Verify worker was killed
-    after_kill = test_client.get("/workers/status").json()
-    assert len([w for w in after_kill['workers'] if w['status'] == 'running']) < len(initial_status['workers'])
+    # Wait for worker to terminate
+    start_time = time.time()
+    while time.time() - start_time < 10:  # Timeout after 10 seconds
+        after_kill = test_client.get("/workers/status").json()
+        if len([w for w in after_kill['workers'] if w['status'] == 'running']) < len(initial_status['workers']):
+            break
+        time.sleep(0.5)
+    else:
+        raise TimeoutError("Worker did not terminate in time")
 
     # Kill worker with replacement
     running_worker = next((w for w in after_kill['workers'] if w['status'] == 'running'), None)
@@ -75,10 +79,16 @@ def test_kill_and_replace_worker(test_client):
     response = test_client.post(f"/workers/kill/{running_worker['pid']}?spawn_replacement=true")
     assert response.status_code == 200
     assert 'replacement_worker' in response.json()
-    time.sleep(1)  # Give time for new worker to start
+    # Wait for new worker to start
+    start_time = time.time()
+    while time.time() - start_time < 10:  # Timeout after 10 seconds
+        final_status = test_client.get("/workers/status").json()
+        if len([w for w in final_status['workers'] if w['status'] == 'running']) == len(after_kill['workers']):
+            break
+        time.sleep(0.5)
+    else:
+        raise TimeoutError("Replacement worker did not start in time")
 
-    # Verify worker count is maintained
-    final_status = test_client.get("/workers/status").json()
     print(final_status)
     assert len([w for w in final_status['workers'] if w['status'] == 'running']) == len(after_kill['workers']), \
         f"Worker count not maintained after replacement ({len(final_status['workers'])} workers running)" + \

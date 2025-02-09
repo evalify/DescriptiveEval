@@ -43,7 +43,7 @@ class EnhancedWorker(Worker):
         if current_time - self.last_heartbeat > self.health_check_interval:
             # Log health status
             memory_usage = psutil.Process(os.getpid()).memory_info().rss / 1024 / 1024  # MB
-            logger.info(
+            logger.debug(
                 f"Worker {worker_name} health check: "
                 f"Jobs processed: {self.total_jobs_processed}, "
                 f"Failed: {self.total_jobs_failed}, "
@@ -93,7 +93,7 @@ try:
         qlogger = QuizLogger(quiz_id)
         
         # Enhanced success logging
-        #worker.total_jobs_processed += 1 # TODO: Is this correct?
+        worker.total_jobs_processed += 1
         success_context = {
             'job_id': job.id,
             'quiz_id': quiz_id,
