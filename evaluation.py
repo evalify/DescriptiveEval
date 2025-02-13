@@ -3,58 +3,40 @@ This module contains functions to evaluate quiz responses in bulk using LLMs and
 """
 
 import asyncio
-import itertools
-import json
 import os
 from datetime import datetime
 from typing import List, Dict, Optional
-
+import json
 from dotenv import load_dotenv
 from redis import Redis
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
-
+import threading
 # Custom imports
-from model import score, LLMProvider, get_llm, score_fill_in_blank, EvaluationStatus
 from utils.db_api import (
     get_quiz_responses,
     get_evaluation_settings,
     get_all_questions,
     set_quiz_response,
-    get_guidelines,
+    set_quiz_responses,
 )
 from utils.errors import (
     NoQuestionsError,
     NoResponsesError,
     InvalidQuestionError,
-    LLMEvaluationError,
     TotalScoreError,
     DatabaseConnectionError,
     EvaluationError,
     ResponseQuestionMismatchError,
-    MCQEvaluationError,
-    CodingEvaluationError,
-    TrueFalseEvaluationError,
-    FillInBlankEvaluationError,
-)
-from utils.evaluation.code_eval import evaluate_coding_question
-from utils.evaluation.static_eval import (
-    evaluate_mcq,
-    evaluate_mcq_with_partial_marking,
-    evaluate_true_false,
-    direct_match,
 )
 from utils.logger import logger, QuizLogger
-from utils.misc import DateTimeEncoder, remove_html_tags, save_quiz_data
+from utils.misc import DateTimeEncoder, save_quiz_data
 from utils.quiz.quiz_report import generate_quiz_report, save_quiz_report
-from utils.quiz.quiz_schema import QuizResponseSchema
 from utils.quiz.evaluation_logger import EvaluationLogger
+from utils.evaluation.evaluator import ResponseEvaluator
 
 load_dotenv()
 CACHE_EX = int(os.getenv("CACHE_EX", 3600))  # Cache expiry time in seconds
-MAX_RETRIES = int(
-    os.getenv("MAX_RETRIES", 10)
-)  # Maximum number of retries for LLM evaluation
 
 
 async def validate_quiz_setup(
@@ -115,20 +97,13 @@ async def bulk_evaluate_quiz_responses(
         redis_client (Redis): Redis client for caching
         save_to_file (bool): Whether to save results to files
         llm: Optional LLM instance to use for evaluation
-        override_evaluated (bool): Whether to re-evaluate already evaluated responses (isEvaluated='EVALUATED')
-        types_to_evaluate (dict): List of question types to evaluate (MCQ, DESCRIPTIVE, CODING, TRUE_FALSE, FILL_IN_BLANK)
+        override_evaluated (bool): Whether to re-evaluate already evaluated responses
+        types_to_evaluate (dict): List of question types to evaluate
 
-    Raises:
-        NoQuestionsError: If no questions are found for the quiz
-        NoResponsesError: If no responses are found for the quiz
-        InvalidQuestionError: If a question is missing required attributes
-        LLMEvaluationError: If LLM evaluation fails after retries
-        TotalScoreError: If there are inconsistencies in total scores
-        DatabaseConnectionError: If database operations fail
-        EvaluationError: For other evaluation-related errors
-        ResponseQuestionMismatchError: If response question IDs is not a subset of quiz questions
+    Returns:
+        List of evaluated quiz responses
     """
-    # Initialize quiz-specific logger
+    # Initialize loggers
     qlogger = QuizLogger(quiz_id)
     eval_logger = EvaluationLogger(quiz_id)
     qlogger.info(f"Starting evaluation for quiz {quiz_id}")
@@ -136,8 +111,7 @@ async def bulk_evaluate_quiz_responses(
         f"Evaluation parameters: override_evaluated={override_evaluated}, types_to_evaluate={types_to_evaluate}"
     )
 
-    # Initialize variables here to prevent unbound local var error
-    question_count_by_type = {}  # Count questions by type
+    question_count_by_type = {}
     quiz_responses = None
     time_taken = None
 
@@ -156,8 +130,9 @@ async def bulk_evaluate_quiz_responses(
             """UPDATE "QuizResult" SET "isEvaluated" = 'UNEVALUATED' WHERE "quizId" = %s""",
             (quiz_id,),
         )
+
     try:
-        # Get quiz data with better error handling
+        # Get quiz data
         try:
             quiz_responses = get_quiz_responses(
                 cursor=pg_cursor,
@@ -181,51 +156,41 @@ async def bulk_evaluate_quiz_responses(
         # Validate quiz setup
         await validate_quiz_setup(quiz_id, questions, quiz_responses)
 
-        # Get evaluation settings with defaults
-        evaluation_settings = get_evaluation_settings(pg_cursor, quiz_id) or {}
-        negative_marking = evaluation_settings.get("negativeMark", False)
-        mcq_partial_marking = evaluation_settings.get("mcqPartialMark", True)
-        if not evaluation_settings:
-            qlogger.warning(
-                f"No evaluation settings found for quiz {quiz_id}. Using defaults:\n"
-                f"- Negative marking: {negative_marking}\n"
-                f"- MCQ partial marking: {mcq_partial_marking}"
-            )
+        # Get evaluation settings
+        evaluation_settings = get_evaluation_settings(pg_cursor, quiz_id)
 
-        qlogger.info(f"Evaluation Settings for quiz {quiz_id}:\n")
-        qlogger.info(f"Negative Marking: {negative_marking}")
-        qlogger.info(f"MCQ Partial Marking: {mcq_partial_marking}")
-
-        # Initialize LLM with API key rotation
-        if llm is None:
-            qlogger.info(
-                "No LLM instance provided. Using default Groq API key rotation"
-            )
-            keys = [
-                os.getenv(f"GROQ_API_KEY{i if i > 1 else ''}", None)
-                for i in range(1, 6)
-            ]
-            valid_keys = [key for key in keys if key]
-            if not valid_keys:
-                raise EvaluationError(
-                    "No valid API keys found for evaluation.\n"
-                    "Please ensure at least one GROQ_API_KEY is set in environment variables."
-                )
-            groq_api_keys = itertools.cycle(valid_keys)
-            qlogger.info(f"Using {len(valid_keys)} API keys in rotation for evaluation")
-
+        # Count questions by type
         for question in questions:
             q_type = question.get("type", "UNKNOWN").upper()
             question_count_by_type[q_type] = question_count_by_type.get(q_type, 0) + 1
 
+        # Initialize response evaluator
+        evaluator = ResponseEvaluator(quiz_id, questions, evaluation_settings, llm)
+
         with logging_redirect_tqdm(loggers=[logger]):
+            tmp = []  # Filter Evaluated Responses
+            for quiz_result in quiz_responses:
+                if quiz_result.get("isEvaluated") == "EVALUATED":
+                    if not override_evaluated:
+                        qlogger.info(
+                            f"Skipping evaluation for already evaluated quiz response {quiz_result['id']}"
+                        )
+                        continue
+                    else:
+                        qlogger.info(
+                            f"Re-evaluating quiz response {quiz_result['id']} due to override flag"
+                        )
+                        quiz_result["isEvaluated"] = "UNEVALUATED"
+
+                tmp.append(quiz_result)
+            quiz_responses = tmp
+
             progress_bar = tqdm(
                 quiz_responses,
                 desc=f"Evaluating {quiz_id}",
                 unit="response",
                 dynamic_ncols=True,
             )
-            qlogger.info(f"Starting evaluation for quiz {quiz_id}")
             qlogger.info(f"Questions count by type: {question_count_by_type}")
             qlogger.info(f"Selective evaluation: {types_to_evaluate}")
 
@@ -242,686 +207,57 @@ async def bulk_evaluate_quiz_responses(
                 "metadata",
             )
 
-            for quiz_result in progress_bar:
-                time_taken = progress_bar.format_dict["elapsed"]
-                qlogger.debug(
-                    f"Processing response {quiz_result['id']} for student {quiz_result['studentId']}"
-                )
-                if quiz_result.get("isEvaluated") == "EVALUATED":
-                    if not override_evaluated:
-                        qlogger.info(
-                            f"Skipping evaluation for already evaluated quiz response {quiz_result['id']}"
-                        )
-                        continue
-                    qlogger.info(f"Re-evaluating quiz response {quiz_result['id']}")
-                quiz_result["totalScore"] = 0
+            EVAL_BATCH_SIZE = int(os.getenv("EVAL_BATCH_SIZE", 5))
+            total_responses = len(quiz_responses)
+            processed_results = []
 
-                response_question_ids = set(quiz_result["responses"])
-                valid_question_ids = {str(q["_id"]) for q in questions}
-                invalid_questions = response_question_ids - valid_question_ids
-                if invalid_questions:
-                    raise ResponseQuestionMismatchError(quiz_id, invalid_questions)
-
-                questions_progress = tqdm(
-                    questions,
-                    desc=f"ResponseId:{quiz_result['id']}",
-                    unit="question",
-                    leave=False,
-                    dynamic_ncols=True,
-                )
-                for question in questions_progress:
-                    qid = str(question["_id"])
-                    question_type = question.get("type", "").upper()
-                    qlogger.debug(f"Evaluating question {qid} of type {question_type}")
-
-                    if not quiz_result["responses"]:
-                        qlogger.warning(
-                            f"No responses found for quiz response {quiz_result['id']}"
-                        )
-                        continue
-
-                    # Handle old schema conversion
-                    if isinstance(quiz_result["responses"].get(qid), list):
-                        quiz_result["responses"][qid] = {
-                            "student_answer": quiz_result["responses"][qid],
-                        }
-                        if "questionMarks" in quiz_result:
-                            del quiz_result["questionMarks"]
-
-                    # Validate question marks
-                    try:
-                        if question.get("marks") is not None:
-                            question["mark"] = question["marks"]
-                        question_total_score = question["mark"]
-                        quiz_result["totalScore"] += question_total_score
-                    except KeyError:
-                        raise InvalidQuestionError(
-                            f"Question {qid} is missing required 'mark'/'marks' attribute.\n"
-                            f"Question data: {json.dumps(question, indent=2, cls=DateTimeEncoder)}"
-                        )
-
-                    if qid not in quiz_result["responses"]:
-                        qlogger.warning(
-                            f"No response found for question {qid} in quiz response {quiz_result['id']}"
-                        )
-                        continue  # TODO: Check for issues caused by misplacement of this block in previous versions
-
-                    # Skip question if its type is not in types_to_evaluate
-                    if types_to_evaluate and not types_to_evaluate.get(
-                        question_type,
-                        types_to_evaluate.get(question_type.lower(), True),
-                    ):
-                        qlogger.info(
-                            f"Skipping evaluation for question {qid} of type {question_type} as per types_to_evaluate"
-                        )
-                        continue
-
-                    # Question type specific evaluation
-                    try:
-                        # Track evaluation metadata
-                        evaluation_metadata = {
-                            "evaluatedAt": datetime.now().isoformat(),
-                            "questionType": question_type,
-                            "evaluationAttempts": 0,  # Will be updated for LLM evaluations
-                        }
-                        attempt = 0
-                        match question.get("type", "").upper():
-                            case "MCQ":
-                                qlogger.debug(f"Evaluating MCQ question {qid}")
-                                student_answers = QuizResponseSchema.get_attribute(
-                                    quiz_result, qid, "student_answer"
-                                )
-                                if not student_answers:
-                                    qlogger.warning(
-                                        f"Empty response for MCQ question {qid}"
-                                    )
-                                    QuizResponseSchema.set_attribute(
-                                        quiz_result, qid, "score", 0
-                                    )
-                                    QuizResponseSchema.set_attribute(
-                                        quiz_result,
-                                        qid,
-                                        "remarks",
-                                        "No answer provided",
-                                    )
-                                    continue
-
-                                correct_answers = question.get("answer")
-                                if not correct_answers:
-                                    raise InvalidQuestionError(
-                                        f"Question {qid} is missing correct answer.\n"
-                                        f"Question data: {json.dumps(question, indent=2, cls=DateTimeEncoder)}"
-                                    )
-
-                                try:
-                                    if mcq_partial_marking:
-                                        mcq_score = (
-                                            await evaluate_mcq_with_partial_marking(
-                                                student_answers,
-                                                correct_answers,
-                                                question_total_score,
-                                            )
-                                        )
-                                    else:
-                                        mcq_score = await evaluate_mcq(
-                                            student_answers,
-                                            correct_answers,
-                                            question_total_score,
-                                        )
-
-                                    QuizResponseSchema.set_attribute(
-                                        quiz_result, qid, "score", mcq_score
-                                    )
-                                    if negative_marking and mcq_score <= 0:
-                                        neg_score = question.get(
-                                            "negativeMark", -question_total_score / 2
-                                        )
-                                        QuizResponseSchema.set_attribute(
-                                            quiz_result,
-                                            qid,
-                                            "negative_score",
-                                            neg_score,
-                                        )
-                                        # logger.info(f"Applied negative marking ({neg_score}) for incorrect MCQ answer in {qid}")
-                                    else:
-                                        QuizResponseSchema.set_attribute(
-                                            quiz_result, qid, "negative_score", 0
-                                        )
-
-                                    eval_logger.log_question_evaluation(
-                                        qid,
-                                        question,
-                                        quiz_result["studentId"],
-                                        quiz_result["responses"][qid],
-                                        {
-                                            "score": mcq_score,
-                                            "negative_score": quiz_result["responses"][
-                                                qid
-                                            ].get("negative_score", 0),
-                                        },
-                                        evaluation_metadata,
-                                    )
-
-                                except Exception:
-                                    qlogger.error(
-                                        f"MCQ evaluation failed for question {qid}",
-                                        exc_info=True,
-                                    )
-                                    raise MCQEvaluationError(
-                                        qid, student_answers, correct_answers
-                                    )
-
-                            case "DESCRIPTIVE":
-                                qlogger.debug(f"Evaluating descriptive question {qid}")
-                                clean_question = remove_html_tags(
-                                    question["question"]
-                                ).strip()
-                                student_answer = QuizResponseSchema.get_attribute(
-                                    quiz_result, qid, "student_answer"
-                                )[0]
-
-                                if await direct_match(
-                                    student_answer,
-                                    question["expectedAnswer"],
-                                    strip=True,
-                                    case_sensitive=False,
-                                ):
-                                    score_res = {
-                                        "score": question_total_score,
-                                        "reason": "Exact Match",
-                                        "breakdown": "Exact Match - LLM not used",
-                                        "status": EvaluationStatus.SUCCESS,
-                                    }
-                                else:
-                                    current_llm = (
-                                        llm
-                                        if llm
-                                        else get_llm(
-                                            LLMProvider.GROQ, next(groq_api_keys)
-                                        )
-                                    )
-                                    question_guidelines = await get_guidelines(
-                                        redis_client=redis_client,
-                                        question_id=qid,
-                                        llm=current_llm,
-                                        question=clean_question,
-                                        expected_answer=question["expectedAnswer"],
-                                        total_score=question_total_score,
-                                    )
-
-                                    if question_guidelines.get("status", 403) == 403:
-                                        continue
-
-                                    errors = []
-                                    for attempt in range(MAX_RETRIES):
-                                        try:
-                                            score_res = await score(
-                                                llm=current_llm,
-                                                question=clean_question,
-                                                student_ans=student_answer,
-                                                expected_ans=" ".join(
-                                                    question["expectedAnswer"]
-                                                ),
-                                                total_score=question_total_score,
-                                                guidelines=question_guidelines,
-                                                errors=errors
-                                                if attempt < 5
-                                                else errors
-                                                + [
-                                                    f"Warning: Attempt remaining {MAX_RETRIES - attempt - 1}"
-                                                ],
-                                            )
-
-                                            # Check response status
-                                            if score_res["status"] in [
-                                                EvaluationStatus.EMPTY_ANSWER,
-                                                EvaluationStatus.INVALID_INPUT,
-                                            ]:
-                                                # Don't retry for empty answers
-                                                break
-                                            elif (
-                                                score_res["status"]
-                                                != EvaluationStatus.SUCCESS
-                                            ):
-                                                error_msg = f"LLM returned error with status {score_res['status']}: {score_res['reason']}"
-                                                qlogger.warning(
-                                                    f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}"
-                                                )
-                                                qlogger.warning(
-                                                    f"Studentid {quiz_result['studentId']}"
-                                                )
-                                                qlogger.warning(
-                                                    f"Quizid {quiz_result['quizId']}"
-                                                )
-                                                qlogger.warning(f"Questionid {qid}")
-                                                qlogger.warning(
-                                                    f"Student Answer: {student_answer}"
-                                                )
-                                                errors.append(error_msg)
-
-                                                if not llm:
-                                                    current_llm = get_llm(
-                                                        LLMProvider.GROQ,
-                                                        next(groq_api_keys),
-                                                        "llama-3.3-70b-versatile"
-                                                        if attempt > 5
-                                                        else None,
-                                                    )
-                                                continue
-
-                                            break
-                                        except Exception as e:
-                                            error_msg = f"Unexpected error during scoring: {str(e)}"
-                                            qlogger.warning(
-                                                f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}"
-                                            )
-                                            errors.append(error_msg)
-
-                                            if not llm:
-                                                current_llm = get_llm(
-                                                    LLMProvider.GROQ,
-                                                    next(groq_api_keys),
-                                                    "llama-3.3-70b-versatile"
-                                                    if attempt > 5
-                                                    else None,
-                                                )
-                                    else:
-                                        error_details = "\n".join(errors)
-                                        raise LLMEvaluationError(
-                                            f"Failed to evaluate response after {MAX_RETRIES} attempts.\n"
-                                            f"Quiz ID: {quiz_id}\n"
-                                            f"Question ID: {qid}\n"
-                                            f"Student Answer: {student_answer[:100]}...\n"
-                                            f"Errors encountered:\n{error_details}"
-                                        )
-
-                                QuizResponseSchema.set_attribute(
-                                    quiz_result, qid, "score", score_res["score"]
-                                )
-                                QuizResponseSchema.set_attribute(
-                                    quiz_result, qid, "remarks", score_res["reason"]
-                                )
-                                QuizResponseSchema.set_attribute(
-                                    quiz_result,
-                                    qid,
-                                    "breakdown",
-                                    score_res["breakdown"],
+            # Process responses in batches
+            for i in range(0, total_responses, EVAL_BATCH_SIZE):
+                batch = quiz_responses[i : i + EVAL_BATCH_SIZE]
+                tasks = []
+                for index, quiz_result in enumerate(batch, start=1):
+                    async def process_response(qr=quiz_result, index=index):
+                        try:
+                            print("Processing response ", index)
+                            # Validate response question IDs
+                            response_question_ids = set(qr["responses"])
+                            valid_question_ids = {str(q["_id"]) for q in questions}
+                            invalid_questions = response_question_ids - valid_question_ids
+                            if invalid_questions:
+                                raise ResponseQuestionMismatchError(
+                                    quiz_id, invalid_questions
                                 )
 
-                                # Update metadata with LLM attempts
-                                evaluation_metadata["evaluationAttempts"] = attempt + 1
-                                evaluation_metadata["llmProvider"] = (
-                                    llm.__class__.__name__
-                                )
-
-                                eval_logger.log_question_evaluation(
-                                    qid,
-                                    question,
-                                    quiz_result["studentId"],
-                                    quiz_result["responses"][qid],
-                                    score_res,
-                                    evaluation_metadata,
-                                )
-
-                            case "CODING":
-                                qlogger.debug(f"Evaluating coding question {qid}")
-                                response = QuizResponseSchema.get_attribute(
-                                    quiz_result, qid, "student_answer"
-                                )
-                                if not response:
-                                    qlogger.warning(
-                                        f"Empty response for coding question {qid}"
-                                    )
-                                    QuizResponseSchema.set_attribute(
-                                        quiz_result, qid, "score", 0
-                                    )
-                                    QuizResponseSchema.set_attribute(
-                                        quiz_result, qid, "remarks", "No code submitted"
-                                    )
-                                    continue
-
-                                driver_code = question.get("driverCode")
-                                test_cases = question.get("testcases", [])
-                                if not driver_code or not test_cases:
-                                    raise InvalidQuestionError(
-                                        f"Question {qid} is missing driver code or test cases.\n"
-                                        f"Question data: {json.dumps(question, indent=2, cls=DateTimeEncoder)}"
-                                    )
-
-                                try:
-                                    (
-                                        coding_score,
-                                        eval_result,
-                                    ) = await evaluate_coding_question(
-                                        student_response=response[0],
-                                        driver_code=driver_code,
-                                        test_cases_count=len(test_cases),
-                                    )
-                                    QuizResponseSchema.set_attribute(
-                                        quiz_result, qid, "score", coding_score
-                                    )
-                                    if (
-                                        eval_result
-                                    ):  # Add execution result as remarks if available
-                                        QuizResponseSchema.set_attribute(
-                                            quiz_result, qid, "remarks", eval_result
-                                        )
-
-                                    eval_logger.log_question_evaluation(
-                                        qid,
-                                        question,
-                                        quiz_result["studentId"],
-                                        quiz_result["responses"][qid],
-                                        {"score": coding_score, "remarks": eval_result},
-                                        evaluation_metadata,
-                                    )
-
-                                except Exception as e:
-                                    qlogger.error(
-                                        f"Coding evaluation failed for question {qid}",
-                                        exc_info=True,
-                                    )
-                                    raise CodingEvaluationError(
-                                        qid, str(e), len(test_cases)
-                                    )
-
-                            case "TRUE_FALSE":
-                                qlogger.debug(f"Evaluating True/False question {qid}")
-                                response = QuizResponseSchema.get_attribute(
-                                    quiz_result, qid, "student_answer"
-                                )
-                                if not response:
-                                    qlogger.warning(
-                                        f"Empty response for True/False question {qid}"
-                                    )
-                                    QuizResponseSchema.set_attribute(
-                                        quiz_result, qid, "score", 0
-                                    )
-                                    QuizResponseSchema.set_attribute(
-                                        quiz_result,
-                                        qid,
-                                        "remarks",
-                                        "No answer provided",
-                                    )
-                                    continue
-
-                                correct_answer = question.get("answer")
-                                if correct_answer is None:
-                                    raise InvalidQuestionError(
-                                        f"Question {qid} is missing correct answer.\n"
-                                        f"Question data: {json.dumps(question, indent=2, cls=DateTimeEncoder)}"
-                                    )
-
-                                try:
-                                    tf_score = await evaluate_true_false(
-                                        response[0],
-                                        correct_answer,
-                                        question_total_score,
-                                    )
-                                    QuizResponseSchema.set_attribute(
-                                        quiz_result, qid, "score", tf_score
-                                    )
-                                    if negative_marking and tf_score <= 0:
-                                        neg_score = question.get(
-                                            "negativeMark", -question_total_score / 2
-                                        )
-                                        QuizResponseSchema.set_attribute(
-                                            quiz_result,
-                                            qid,
-                                            "negative_score",
-                                            neg_score,
-                                        )
-                                        # logger.info(f"Applied negative marking ({neg_score}) for incorrect True/False answer in {qid}")
-                                    else:
-                                        QuizResponseSchema.set_attribute(
-                                            quiz_result, qid, "negative_score", 0
-                                        )
-
-                                    eval_logger.log_question_evaluation(
-                                        qid,
-                                        question,
-                                        quiz_result["studentId"],
-                                        quiz_result["responses"][qid],
-                                        {
-                                            "score": tf_score,
-                                            "negative_score": quiz_result["responses"][
-                                                qid
-                                            ].get("negative_score", 0),
-                                        },
-                                        evaluation_metadata,
-                                    )
-
-                                except Exception:
-                                    qlogger.error(
-                                        f"True/False evaluation failed for question {qid}",
-                                        exc_info=True,
-                                    )
-                                    raise TrueFalseEvaluationError(
-                                        qid, response[0], correct_answer
-                                    )
-
-                            case "FILL_IN_BLANK":
-                                qlogger.debug(
-                                    f"Evaluating fill in blank question {qid}"
-                                )
-                                response = QuizResponseSchema.get_attribute(
-                                    quiz_result, qid, "student_answer"
-                                )[0]
-                                if not response:
-                                    qlogger.warning(
-                                        f"Empty response for fill in blank question {qid}"
-                                    )
-                                    QuizResponseSchema.set_attribute(
-                                        quiz_result, qid, "score", 0
-                                    )
-                                    QuizResponseSchema.set_attribute(
-                                        quiz_result,
-                                        qid,
-                                        "remarks",
-                                        "No answer provided",
-                                    )
-                                    continue
-
-                                correct_answer = question.get("expectedAnswer")
-                                if not correct_answer:
-                                    raise InvalidQuestionError(
-                                        f"Question {qid} is missing expected answer.\n"
-                                        f"Question data: {json.dumps(question, indent=2, cls=DateTimeEncoder)}"
-                                    )
-
-                                if await direct_match(
-                                    response,
-                                    correct_answer,
-                                    strip=True,
-                                    case_sensitive=False,
-                                ):
-                                    fitb_score = {
-                                        "score": question_total_score,
-                                        "reason": "Exact Match",
-                                        "status": EvaluationStatus.SUCCESS,
-                                    }
-                                else:
-                                    current_llm = (
-                                        llm
-                                        if llm
-                                        else get_llm(
-                                            LLMProvider.GROQ, next(groq_api_keys)
-                                        )
-                                    )
-                                    clean_question = remove_html_tags(
-                                        question["question"]
-                                    ).strip()
-
-                                    evaluation_attempts = []
-                                    for attempt in range(MAX_RETRIES):
-                                        try:
-                                            fitb_score = await score_fill_in_blank(
-                                                llm=current_llm,
-                                                question=clean_question,
-                                                student_ans=response,
-                                                expected_ans=correct_answer,
-                                                total_score=question_total_score,
-                                            )
-
-                                            # Check response status
-                                            if fitb_score["status"] in [
-                                                EvaluationStatus.EMPTY_ANSWER,
-                                                EvaluationStatus.INVALID_INPUT,
-                                            ]:
-                                                # Don't retry for empty answers
-                                                break
-                                            elif (
-                                                fitb_score["status"]
-                                                != EvaluationStatus.SUCCESS
-                                            ):
-                                                error_msg = f"LLM returned error with status {fitb_score['status']}: {fitb_score['reason']}"
-                                                qlogger.warning(
-                                                    f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}"
-                                                )
-                                                evaluation_attempts.append(
-                                                    {
-                                                        "error": error_msg,
-                                                        "model": current_llm.__class__.__name__,
-                                                    }
-                                                )
-
-                                                if not llm:
-                                                    current_llm = get_llm(
-                                                        LLMProvider.GROQ,
-                                                        next(groq_api_keys),
-                                                        "llama-3.3-70b-versatile"
-                                                        if attempt > 5
-                                                        else None,
-                                                    )
-                                                continue
-                                            break
-
-                                        except Exception as e: #TODO: Handle Expected and Unexpected Errors properly
-                                            error_msg = f"Unexpected error: {str(e)}"
-                                            qlogger.warning(
-                                                f"Attempt {attempt + 1}/{MAX_RETRIES} failed for question {qid}. "
-                                                f"Error: {error_msg}"
-                                            )
-                                            evaluation_attempts.append(
-                                                {
-                                                    "error": error_msg,
-                                                    "model": current_llm.__class__.__name__,
-                                                }
-                                            )
-
-                                            if not llm:
-                                                current_llm = get_llm(
-                                                    LLMProvider.GROQ,
-                                                    next(groq_api_keys),
-                                                    "llama-3.3-70b-versatile"
-                                                    if attempt > 5
-                                                    else None,
-                                                )
-                                    else:
-                                        raise FillInBlankEvaluationError(
-                                            qid, evaluation_attempts, MAX_RETRIES
-                                        )
-
-                                QuizResponseSchema.set_attribute(
-                                    quiz_result, qid, "score", fitb_score["score"]
-                                )
-                                QuizResponseSchema.set_attribute(
-                                    quiz_result, qid, "remarks", fitb_score["reason"]
-                                )
-
-                                # Update metadata with LLM attempts
-                                evaluation_metadata["evaluationAttempts"] = attempt + 1
-                                evaluation_metadata["llmProvider"] = (
-                                    llm.__class__.__name__
-                                )
-
-                                eval_logger.log_question_evaluation(
-                                    qid,
-                                    question,
-                                    quiz_result["studentId"],
-                                    quiz_result["responses"][qid],
-                                    fitb_score,
-                                    evaluation_metadata,
-                                )
-
-                            case _:
-                                qlogger.warning(
-                                    f"Unhandled question type: {question.get('type')!r} for question {qid}"
-                                )
-
-                    except Exception as e:
-                        qlogger.error(
-                            f"Error evaluating question {qid} of type {question.get('type')}:\n"
-                            f"Error: {str(e)}\n"
-                            f"Question data: {json.dumps(question, indent=2, cls=DateTimeEncoder)}\n"
-                            f"Response data: {json.dumps(quiz_result.get('responses', {}).get(qid), indent=2, cls=DateTimeEncoder)}"
-                        )
-                        # Log failed evaluation
-                        eval_logger.log_question_evaluation(
-                            qid,
-                            question,
-                            quiz_result["studentId"],
-                            quiz_result["responses"][qid],
-                            {"error": str(e)},
-                            {
-                                "evaluatedAt": datetime.now().isoformat(),
-                                "status": "failed",
-                            },
-                        )
-                        raise
-
-                # Calculate total score including negative marking
-                quiz_result["score"] = max(
-                    sum(
-                        [
-                            (
-                                QuizResponseSchema.get_attribute(
-                                    quiz_result, qid, "score"
-                                )
-                                or 0
+                            # Evaluate single response
+                            evaluated_result = await evaluator.evaluate_response(
+                                qr, types_to_evaluate
                             )
-                            + (
-                                QuizResponseSchema.get_attribute(
-                                    quiz_result, qid, "negative_score"
-                                )
-                                or 0
-                            )
-                            for qid in quiz_result["responses"].keys()
-                        ]
-                    ),
-                    0,
-                )
 
-                # Save result back to database
-                await set_quiz_response(pg_cursor, pg_conn, quiz_result)
-                qlogger.info(
-                    f"Response {quiz_result['id']} evaluated. Final score: {quiz_result['score']}"
-                )
+                            # Save result back to Redis and database
+                            print("Saving response ", index)
+                            await set_quiz_response(pg_cursor, pg_conn, evaluated_result)   # pool this!!
+                            qlogger.info(
+                                f"Response {evaluated_result['id']} evaluated. Final score: {evaluated_result['score']}"
+                            )
+
+
+                            with threading.Lock():
+                                progress_bar.update(1)
+
+                            print("Response processed", index)
+                        except Exception:
+                            print("Error in process_response", index)
+                            return None
+                        else:
+                            return evaluated_result
+
+                    tasks.append(process_response())
+                batch_results = await asyncio.gather(*tasks)
+                processed_results.extend(batch_results)
+                time_taken = progress_bar.format_dict.get("elapsed", 0)
 
     except Exception as e:
         qlogger.error(f"Evaluation failed: {str(e)}", exc_info=True)
-        if isinstance(
-            e,
-            (
-                NoQuestionsError,
-                NoResponsesError,
-                InvalidQuestionError,
-                LLMEvaluationError,
-                TotalScoreError,
-                DatabaseConnectionError,
-            ),
-        ):
-            # These are already formatted nicely, just log them
-            qlogger.error(str(e))
-        else:
-            # Unexpected errors need more context
-            qlogger.error(
-                f"Unexpected error during evaluation of quiz {quiz_id}:\n"
-                f"Error Type: {type(e).__name__}\n"
-                f"Error Details: {str(e)}\n"
-                "Stack trace:",
-                exc_info=True,
-            )
 
         save_quiz_data(
             {

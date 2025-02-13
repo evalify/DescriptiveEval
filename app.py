@@ -719,6 +719,12 @@ async def stop_jobs(quiz_id: str):
                 finally:
                     current_job.cancel()
                     current_job.save()
+        
+        # Unlock the quiz
+        quiz_lock = QuizLock(redis_conn, quiz_id)
+        if quiz_lock.is_locked():
+            quiz_lock.release()
+            logger.warning(f"Quiz {quiz_id} lock released")
 
         return {"message": f"Stopped all jobs for quiz ID: {quiz_id}"}
     except Exception as e:
@@ -762,12 +768,19 @@ async def kill_worker(pid: int, spawn_replacement: bool = True):
             # Cancel any current job
             current_job = worker.get_current_job()
             if current_job:
+                quiz_id = current_job.args[0] if current_job.args else None
                 logger.warning(
                     f"[{trace_id}] Cancelling job {current_job.id} on worker {pid}"
                 )
                 send_stop_job_command(redis_conn, current_job.id)
                 current_job.cancel()
                 current_job.save()
+                if quiz_id:
+                    # Unlock the quiz
+                    quiz_lock = QuizLock(redis_conn, quiz_id)
+                    if quiz_lock.is_locked():
+                        quiz_lock.release()
+                        logger.warning(f"Quiz {quiz_id} lock released")
 
             # Deregister the worker
             worker.teardown()

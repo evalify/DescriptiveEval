@@ -87,6 +87,10 @@ class DatabaseConnectionError(EvaluationError):
     """Raised when database operations fail"""
     pass
 
+class DatabaseError(EvaluationError):
+    """Raised when database operations fail"""
+    pass
+
 class ResponseQuestionMismatchError(EvaluationError):
     """Raised when response contains question IDs that don't exist in quiz questions"""
     def __init__(self, quiz_id: str, invalid_questions: set):
