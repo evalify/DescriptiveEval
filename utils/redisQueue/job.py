@@ -3,7 +3,12 @@ import asyncio
 from evaluation import bulk_evaluate_quiz_responses
 from model import get_llm
 from utils.database import get_postgres_cursor, get_mongo_client, get_redis_client
-from utils.errors import *
+from utils.errors import (
+    NoQuestionsError, InvalidQuestionError, TotalScoreError,
+    NoResponsesError, LLMEvaluationError, MCQEvaluationError,
+    TrueFalseEvaluationError, CodingEvaluationError, FillInBlankEvaluationError,
+    DatabaseConnectionError, EvaluationError
+)
 from utils.logger import logger, QuizLogger
 from utils.redisQueue.lock import QuizLock
 
@@ -81,9 +86,10 @@ async def evaluation_job(quiz_id: str, model_provider, model_name, model_api_key
         qlogger.debug(f"Database connections established for job {job_id}")
         
         llm = None
-        if model_name is not None:
+        if model_name is not None or model_provider != "groq":
             llm = get_llm(provider=model_provider, model_name=model_name, api_key=model_api_key)
             qlogger.debug(f"Initialized LLM model {model_name} for job {job_id}")
+        # else, llm is None => Use Groq API Cycling
         
         async def execute_evaluation():
             result = await bulk_evaluate_quiz_responses(

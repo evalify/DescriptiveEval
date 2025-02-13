@@ -3,7 +3,7 @@ import os
 import time
 import uuid
 from contextlib import asynccontextmanager
-from typing import Optional
+from typing import Optional, Dict
 
 import deprecated
 import psutil
@@ -11,7 +11,7 @@ from fastapi import FastAPI, Depends, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from rq import Queue, Worker
 from rq.job import JobStatus
 from rq.command import send_stop_job_command
@@ -108,7 +108,7 @@ async def lifespan(app: FastAPI):
         # Add Redis queue to app state for easy access
         app.state.task_queue = Queue("task_queue", connection=redis_conn)
 
-    except Exception as e:
+    except Exception:
         logger.critical("Failed to initialize workers during startup", exc_info=True)
         app.state.worker_processes = []
         app.state.task_queue = Queue("task_queue", connection=redis_conn)
@@ -250,13 +250,17 @@ app = FastAPI(lifespan=lifespan)
 logger.info("Initializing FastAPI application")
 
 # Store current provider in app state
-app.state.current_provider = LLMProvider.OLLAMA
-app.state.current_model_name = "deepseek-r1:70b"
+app.state.current_provider = LLMProvider.VLLM
+app.state.current_model_name = (
+    "meta-llama/Meta-Llama-3.1-8B-Instruct"  # "deepseek-r1:70b"
+)
 app.state.current_api_key = None
 
-app.state.current_micro_llm_provider = LLMProvider.GROQ
-app.state.current_micro_llm_model_name = "llama-3.3-70b-specdec"
-app.state.current_micro_llm_api_key = os.getenv("GROQ_API_KEY")
+app.state.current_micro_llm_provider = LLMProvider.VLLM  # LLMProvider.GROQ
+app.state.current_micro_llm_model_name = (
+    "meta-llama/Meta-Llama-3.1-8B-Instruct"  # "llama-3.3-70b-specdec"
+)
+app.state.current_micro_llm_api_key = None  # os.getenv("GROQ_API_KEY")
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -315,15 +319,13 @@ class EvalRequest(BaseModel):
     quiz_id: str
     override_evaluated: bool = False
     override_locked: bool = False
-    types_to_evaluate: Optional[dict] = Field(
-        default_factory=lambda: {
-            "MCQ": True,
-            "DESCRIPTIVE": True,
-            "CODING": True,
-            "TRUE_FALSE": True,
-            "FILL_IN_BLANK": True,
-        }
-    )
+    types_to_evaluate: Optional[Dict[str, bool]] = {
+        "MCQ": True,
+        "DESCRIPTIVE": True,
+        "CODING": True,
+        "TRUE_FALSE": True,
+        "FILL_IN_BLANK": True,
+    }
 
 
 @app.get("/")
@@ -404,7 +406,7 @@ async def get_response(request: QueryRequest, llm=Depends(get_llm_dependency)):
     except EmptyAnswerError as e:
         logger.error(f"[{trace_id}] Empty answer error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+    except Exception:
         logger.error(f"[{trace_id}] Error processing scoring request", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -443,7 +445,7 @@ async def generate_guidelines_api(
     except InvalidInputError as e:
         logger.error(f"[{trace_id}] Invalid input error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
+    except Exception:
         logger.error(f"[{trace_id}] Error generating guidelines", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -460,8 +462,8 @@ async def enhance_qa(
     except InvalidInputError as e:
         logger.error(f"Invalid input error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error enhancing question and answer", exc_info=True)
+    except Exception:
+        logger.error("Error enhancing question and answer", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 
@@ -485,8 +487,8 @@ async def evaluate_bulk(request: EvalRequest, llm=Depends(get_llm_dependency)):
     except InvalidQuizIDError as e:
         logger.error(f"Invalid quiz ID error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error during evaluation", exc_info=True)
+    except Exception:
+        logger.error("Error during evaluation", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         postgres_cursor.close()
@@ -545,7 +547,7 @@ async def evaluate_bulk_queue(
     except HTTPException as e:
         logger.error(f"[{trace_id}] HTTP Exception: {str(e)}")
         raise HTTPException(status_code=e.status_code, detail=e.detail)
-    except Exception as e:
+    except Exception:
         logger.error(f"[{trace_id}] Failed to queue evaluation", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
@@ -568,8 +570,8 @@ async def regenerate_quiz_report(quiz_id: str):
     except InvalidQuizIDError as e:
         logger.error(f"Invalid quiz ID error: {str(e)}")
         raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Error regenerating quiz report", exc_info=True)
+    except Exception:
+        logger.error("Error regenerating quiz report", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
     finally:
         postgres_cursor.close()

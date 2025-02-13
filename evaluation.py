@@ -7,7 +7,7 @@ import itertools
 import json
 import os
 from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Optional
 
 from dotenv import load_dotenv
 from redis import Redis
@@ -294,7 +294,7 @@ async def bulk_evaluate_quiz_responses(
                             question["mark"] = question["marks"]
                         question_total_score = question["mark"]
                         quiz_result["totalScore"] += question_total_score
-                    except KeyError as e:
+                    except KeyError:
                         raise InvalidQuestionError(
                             f"Question {qid} is missing required 'mark'/'marks' attribute.\n"
                             f"Question data: {json.dumps(question, indent=2, cls=DateTimeEncoder)}"
@@ -402,7 +402,7 @@ async def bulk_evaluate_quiz_responses(
                                         evaluation_metadata,
                                     )
 
-                                except Exception as e:
+                                except Exception:
                                     qlogger.error(
                                         f"MCQ evaluation failed for question {qid}",
                                         exc_info=True,
@@ -691,7 +691,7 @@ async def bulk_evaluate_quiz_responses(
                                         evaluation_metadata,
                                     )
 
-                                except Exception as e:
+                                except Exception:
                                     qlogger.error(
                                         f"True/False evaluation failed for question {qid}",
                                         exc_info=True,

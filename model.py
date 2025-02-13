@@ -6,6 +6,7 @@ from langchain.output_parsers import ResponseSchema, StructuredOutputParser
 from langchain_core.prompts import PromptTemplate
 from langchain_groq import ChatGroq
 from langchain_ollama import ChatOllama
+from langchain_openai import ChatOpenAI
 
 
 from utils.evaluation.templates import (
@@ -23,6 +24,7 @@ load_dotenv()
 class LLMProvider(Enum):
     OLLAMA = "ollama"
     GROQ = "groq"
+    VLLM = "vllm"
 
 
 class EvaluationStatus(Enum):
@@ -44,18 +46,25 @@ def get_llm(provider: LLMProvider = LLMProvider.GROQ, api_key=None, model_name=N
     :param api_key: The API key for the provider (optional)
     :param model_name: The model name for the provider (optional)
     """
-    if provider == LLMProvider.OLLAMA:
+    if provider == LLMProvider.VLLM:
+        return ChatOpenAI(
+            model_name=model_name or "meta-llama/Meta-Llama-3.1-8B-Instruct",
+            base_url=os.getenv("VLLM_HOST", "http://localhost:8000"),
+            temperature=0.2,
+            api_key=api_key or "123",
+        )
+
+    elif provider == LLMProvider.OLLAMA:
         return ChatOllama(
             model=model_name if model_name else "llama3.3",
             base_url=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
             temperature=0.2,
-            format="json",
         )
     elif provider == LLMProvider.GROQ:
         return ChatGroq(
-            api_key=api_key if api_key else os.getenv("GROQ_API_KEY"),
             model_name=model_name if model_name else "llama-3.3-70b-specdec",
             temperature=0.2,
+            api_key=api_key if api_key else os.getenv("GROQ_API_KEY"),
         )
     else:
         raise InvalidProviderError(provider)
