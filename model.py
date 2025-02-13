@@ -7,7 +7,6 @@ from langchain_core.prompts import PromptTemplate
 from langchain_groq import ChatGroq
 from langchain_ollama import ChatOllama
 
-load_dotenv()
 
 from utils.evaluation.templates import (
     evaluation_template,
@@ -18,10 +17,20 @@ from utils.evaluation.templates import (
 from utils.logger import logger
 from utils.errors import InvalidProviderError
 
+load_dotenv()
+
 
 class LLMProvider(Enum):
     OLLAMA = "ollama"
     GROQ = "groq"
+
+
+class EvaluationStatus(Enum):
+    SUCCESS = 200  # Successful evaluation
+    INVALID_INPUT = 400  # Invalid input parameters
+    EMPTY_ANSWER = 422  # Empty or missing student answer
+    LLM_ERROR = 500  # LLM processing error
+    PARSE_ERROR = 502  # Response parsing error
 
 
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", 3))
@@ -80,8 +89,8 @@ async def score(
             "rubric": "Error: Invalid input parameters",
             "breakdown": "Error: Invalid input parameters",
             "score": 0.0,
-            "reason": "Error: Invalid input parameters: expected_ans='{expected_ans}', total_score='{total_score}'",
-            "status": 403,
+            "reason": f"Error: Invalid input parameters: expected_ans='{expected_ans}', total_score='{total_score}'",
+            "status": EvaluationStatus.INVALID_INPUT,
         }
 
     if not student_ans or student_ans.strip() == "":
@@ -91,7 +100,7 @@ async def score(
             "breakdown": "Error: Student answer is empty or missing",
             "score": 0.0,
             "reason": "Error: Student answer is empty or missing",
-            "status": 403,
+            "status": EvaluationStatus.EMPTY_ANSWER,
         }
 
     # Update response schemas to include 'rubric' and 'breakdown'
@@ -155,6 +164,13 @@ async def score(
                 logger.warning(
                     f"Retrying {i}/{MAX_RETRIES} because Unable to parse response error {str(e)}"
                 )
+                parsed_response = {
+                    "rubric": "Error: Failed to parse LLM response",
+                    "breakdown": "Error: Failed to parse LLM response",
+                    "score": 0.0,
+                    "reason": f"Error: Failed to parse LLM response: {str(e)}",
+                    "status": EvaluationStatus.PARSE_ERROR,
+                }
             else:
                 if i > 0:
                     logger.info(f"Successfully scored response after {i} attempt(s)")
@@ -164,6 +180,11 @@ async def score(
         assert float(parsed_response.get("score", 0.0)) <= total_score, (
             "Error: Score exceeds total score"
         )
+
+        # Add success status if not present
+        if "status" not in parsed_response:
+            parsed_response["status"] = EvaluationStatus.SUCCESS
+
         return {
             "rubric": str(parsed_response.get("rubric", "No rubric available")),
             "breakdown": str(
@@ -171,6 +192,7 @@ async def score(
             ),
             "score": float(parsed_response.get("score", 0.0)),
             "reason": str(parsed_response.get("reason", "No reason provided")),
+            "status": parsed_response.get("status", EvaluationStatus.SUCCESS),
         }
     except Exception as e:
         logger.error(f"Error processing response: {str(e)}", exc_info=True)
@@ -182,6 +204,7 @@ async def score(
             "breakdown": "Error: Could not generate breakdown",
             "score": 0.0,
             "reason": f"Error: Error processing response: {str(e)}",
+            "status": EvaluationStatus.LLM_ERROR,
         }
 
 
@@ -254,7 +277,7 @@ async def generate_guidelines(
         logger.error(f"Error processing response: {str(e)}. {response=}", exc_info=True)
         return {
             "status": 403,
-            "guidelines": f"Error: Error processing response",
+            "guidelines": "Error: Error processing response",
             "error": str(e),
             "prompt": prompt_template.format(
                 question=question,
@@ -350,6 +373,7 @@ async def score_fill_in_blank(
         return {
             "score": 0.0,
             "reason": "Error: Expected answer is empty or missing",
+            "status": EvaluationStatus.INVALID_INPUT,
         }
 
     if not student_ans or student_ans.strip() == "":
@@ -357,6 +381,7 @@ async def score_fill_in_blank(
         return {
             "score": 0.0,
             "reason": "Error: Student answer is empty or missing",
+            "status": EvaluationStatus.EMPTY_ANSWER,
         }
 
     # Update response schemas to include 'rubric' and 'breakdown'
@@ -417,9 +442,9 @@ async def score_fill_in_blank(
     except Exception as e:
         logger.error(f"Error processing response: {str(e)}", exc_info=True)
         return {
-            "status": 403,
             "score": 0.0,
             "reason": f"Error: Error processing response: {str(e)}",
+            "status": EvaluationStatus.LLM_ERROR,
         }
 
 

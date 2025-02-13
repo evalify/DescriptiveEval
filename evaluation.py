@@ -15,12 +15,12 @@ from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 
 # Custom imports
-from model import score, LLMProvider, get_llm, score_fill_in_blank
+from model import score, LLMProvider, get_llm, score_fill_in_blank, EvaluationStatus
 from utils.db_api import (
     get_quiz_responses,
     get_evaluation_settings,
     get_all_questions,
-    set_quiz_response,    
+    set_quiz_response,
     get_guidelines,
 )
 from utils.errors import (
@@ -55,6 +55,7 @@ CACHE_EX = int(os.getenv("CACHE_EX", 3600))  # Cache expiry time in seconds
 MAX_RETRIES = int(
     os.getenv("MAX_RETRIES", 10)
 )  # Maximum number of retries for LLM evaluation
+
 
 async def validate_quiz_setup(
     quiz_id: str, questions: List[dict], responses: List[dict]
@@ -429,6 +430,7 @@ async def bulk_evaluate_quiz_responses(
                                         "score": question_total_score,
                                         "reason": "Exact Match",
                                         "breakdown": "Exact Match - LLM not used",
+                                        "status": EvaluationStatus.SUCCESS,
                                     }
                                 else:
                                     current_llm = (
@@ -470,13 +472,18 @@ async def bulk_evaluate_quiz_responses(
                                                 ],
                                             )
 
-                                            if any(
-                                                score_res[key].startswith("Error:")
-                                                for key in
-                                                # TODO: Use status codes instead
-                                                ["breakdown", "rubric"]
+                                            # Check response status
+                                            if score_res["status"] in [
+                                                EvaluationStatus.EMPTY_ANSWER,
+                                                EvaluationStatus.INVALID_INPUT,
+                                            ]:
+                                                # Don't retry for empty answers
+                                                break
+                                            elif (
+                                                score_res["status"]
+                                                != EvaluationStatus.SUCCESS
                                             ):
-                                                error_msg = f"LLM returned error response: {score_res}"
+                                                error_msg = f"LLM returned error with status {score_res['status']}: {score_res['reason']}"
                                                 qlogger.warning(
                                                     f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}"
                                                 )
@@ -731,6 +738,7 @@ async def bulk_evaluate_quiz_responses(
                                     fitb_score = {
                                         "score": question_total_score,
                                         "reason": "Exact Match",
+                                        "status": EvaluationStatus.SUCCESS,
                                     }
                                 else:
                                     current_llm = (
@@ -755,17 +763,20 @@ async def bulk_evaluate_quiz_responses(
                                                 total_score=question_total_score,
                                             )
 
-                                            if fitb_score is None or fitb_score.get(
-                                                "reason", ""
-                                            ).startswith("Error:"):
-                                                error_msg = (
-                                                    fitb_score.get("reason")
-                                                    if fitb_score
-                                                    else "No response from LLM"
-                                                )
+                                            # Check response status
+                                            if fitb_score["status"] in [
+                                                EvaluationStatus.EMPTY_ANSWER,
+                                                EvaluationStatus.INVALID_INPUT,
+                                            ]:
+                                                # Don't retry for empty answers
+                                                break
+                                            elif (
+                                                fitb_score["status"]
+                                                != EvaluationStatus.SUCCESS
+                                            ):
+                                                error_msg = f"LLM returned error with status {fitb_score['status']}: {fitb_score['reason']}"
                                                 qlogger.warning(
-                                                    f"Attempt {attempt + 1}/{MAX_RETRIES} failed for question {qid}. "
-                                                    f"Error: {error_msg}"
+                                                    f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}"
                                                 )
                                                 evaluation_attempts.append(
                                                     {
