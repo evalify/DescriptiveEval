@@ -144,6 +144,20 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
         save_quiz_data(quiz_responses, quiz_id, "responses")
     return quiz_responses
 
+async def set_quiz_responses(redis_client : Redis, quiz_id : str, responses : dict):
+    """
+    Update the cache with the evaluated results, using async thread.
+
+    :param redis_client: Redis client for caching
+    :param quiz_id: The ID of the quiz to update responses for
+    :param responses: The evaluated responses to update in the cache
+    """
+    await asyncio.to_thread(
+        redis_client.set,
+        f"responses:{quiz_id}_responses_evalcache",
+        json.dumps(responses, cls=DateTimeEncoder),
+        ex=CACHE_EX,
+    )
 
 async def set_quiz_response(cursor, conn, response: dict):
     """
