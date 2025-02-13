@@ -1,10 +1,6 @@
-.venv
-.idea
-.env
-.github
-.pytest_cache
+.*
+!.gitignore
 __pycache__
-.vscode
 logs/
 data/
 archive/

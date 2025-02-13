@@ -9,8 +9,12 @@ from langchain_ollama import ChatOllama
 
 load_dotenv()
 
-from utils.evaluation.templates import evaluation_template, guidelines_template, qa_enhancement_template, \
-    fill_in_the_blank_template
+from utils.evaluation.templates import (
+    evaluation_template,
+    guidelines_template,
+    qa_enhancement_template,
+    fill_in_the_blank_template,
+)
 from utils.logger import logger
 from utils.errors import InvalidProviderError
 
@@ -18,6 +22,9 @@ from utils.errors import InvalidProviderError
 class LLMProvider(Enum):
     OLLAMA = "ollama"
     GROQ = "groq"
+
+
+MAX_RETRIES = int(os.getenv("MAX_RETRIES", 3))
 
 
 def get_llm(provider: LLMProvider = LLMProvider.GROQ, api_key=None, model_name=None):
@@ -29,20 +36,31 @@ def get_llm(provider: LLMProvider = LLMProvider.GROQ, api_key=None, model_name=N
     :param model_name: The model name for the provider (optional)
     """
     if provider == LLMProvider.OLLAMA:
-        return ChatOllama(model=model_name if model_name else "llama3.3",
-                          base_url=os.getenv("OLLAMA_HOST", "http://localhost:11434"), temperature=0.2, format="json")
+        return ChatOllama(
+            model=model_name if model_name else "llama3.3",
+            base_url=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
+            temperature=0.2,
+            format="json",
+        )
     elif provider == LLMProvider.GROQ:
         return ChatGroq(
             api_key=api_key if api_key else os.getenv("GROQ_API_KEY"),
             model_name=model_name if model_name else "llama-3.3-70b-specdec",
-            temperature=0.2
+            temperature=0.2,
         )
     else:
         raise InvalidProviderError(provider)
 
 
-async def score(llm, student_ans: str, expected_ans: str, total_score: float, question: str = None,
-                guidelines: str = None, errors=None) -> dict:
+async def score(
+    llm,
+    student_ans: str,
+    expected_ans: str,
+    total_score: float,
+    question: str = None,
+    guidelines: str = None,
+    errors=None,
+) -> dict:
     """
     Evaluate a student's answer based on the expected answer and guidelines.
 
@@ -55,13 +73,15 @@ async def score(llm, student_ans: str, expected_ans: str, total_score: float, qu
     :param errors: Any errors encountered during evaluation (optional)
     """
     if not expected_ans or expected_ans.strip() == "" or total_score <= 0:
-        logger.error(f"Invalid input parameters: expected_ans='{expected_ans}', total_score='{total_score}'")
+        logger.error(
+            f"Invalid input parameters: expected_ans='{expected_ans}', total_score='{total_score}'"
+        )
         return {
             "rubric": "Error: Invalid input parameters",
             "breakdown": "Error: Invalid input parameters",
             "score": 0.0,
             "reason": "Error: Invalid input parameters: expected_ans='{expected_ans}', total_score='{total_score}'",
-            "status": 403
+            "status": 403,
         }
 
     if not student_ans or student_ans.strip() == "":
@@ -71,57 +91,86 @@ async def score(llm, student_ans: str, expected_ans: str, total_score: float, qu
             "breakdown": "Error: Student answer is empty or missing",
             "score": 0.0,
             "reason": "Error: Student answer is empty or missing",
-            "status": 403
+            "status": 403,
         }
 
     # Update response schemas to include 'rubric' and 'breakdown'
     response_schemas = [
-        ResponseSchema(name="rubric", description="The evaluation rubric as a markdown formatted string"),
-        ResponseSchema(name="score", description="The assigned score as a floating point number"),
-        ResponseSchema(name="reason", description="A short and concise reason for the assigned score"),
-        ResponseSchema(name="breakdown",
-                       description="Detailed breakdown of the allocated marks as a markdown formatted string"),
+        ResponseSchema(
+            name="rubric",
+            description="The evaluation rubric as a markdown formatted string",
+        ),
+        ResponseSchema(
+            name="score", description="The assigned score as a floating point number"
+        ),
+        ResponseSchema(
+            name="reason",
+            description="A short and concise reason for the assigned score",
+        ),
+        ResponseSchema(
+            name="breakdown",
+            description="Detailed breakdown of the allocated marks as a markdown formatted string",
+        ),
     ]
 
     output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
     format_instructions = output_parser.get_format_instructions()
     question_context = " to the question" if question else ""
     question_section = f"\nQuestion:\n{question}\n" if question else "\n"
-    guidelines_section = f"\nQuestion-specific Guidelines:\n{guidelines}\n" if guidelines else "\n"
+    guidelines_section = (
+        f"\nQuestion-specific Guidelines:\n{guidelines}\n" if guidelines else "\n"
+    )
 
     prompt_template = PromptTemplate(
-        input_variables=['student_ans', 'expected_ans', 'total_score', 'errors'],
+        input_variables=["student_ans", "expected_ans", "total_score", "errors"],
         partial_variables={
             "format_instructions": format_instructions,
             "question_context": question_context,
             "question_section": question_section,
-            "guidelines_section": guidelines_section
+            "guidelines_section": guidelines_section,
         },
-        template=evaluation_template
+        template=evaluation_template,
     )
 
     _input = prompt_template.format(
         student_ans=student_ans,
         expected_ans=expected_ans,
         total_score=total_score,
-        errors=errors
+        errors=errors,
     )
 
-    response = None
+    response = parsed_response = None
     try:
-        response = await llm.ainvoke(_input)
-        if hasattr(response, 'content'):
-            response = response.content
-        elif not isinstance(response, str):
-            response = str(response)
+        for i in range(MAX_RETRIES + 1):
+            response = await llm.ainvoke(_input)
+            if hasattr(response, "content"):
+                response = response.content
+            elif not isinstance(response, str):
+                response = str(response)
 
-        parsed_response = output_parser.parse(response)
-        assert float(parsed_response.get("score", 0.0)) <= total_score, "Error: Score exceeds total score"
+            try:
+                parsed_response = output_parser.parse(response)
+            except Exception as e:
+                logger.debug("Detailed Stack Trace for below error", exc_info=True)
+                logger.warning(
+                    f"Retrying {i}/{MAX_RETRIES} because Unable to parse response error {str(e)}"
+                )
+            else:
+                if i > 0:
+                    logger.info(f"Successfully scored response after {i} attempt(s)")
+                break
+
+        assert parsed_response is not None, "Error: Failed to get/parse response"
+        assert float(parsed_response.get("score", 0.0)) <= total_score, (
+            "Error: Score exceeds total score"
+        )
         return {
             "rubric": str(parsed_response.get("rubric", "No rubric available")),
-            "breakdown": str(parsed_response.get("breakdown", "No breakdown available")),
+            "breakdown": str(
+                parsed_response.get("breakdown", "No breakdown available")
+            ),
             "score": float(parsed_response.get("score", 0.0)),
-            "reason": str(parsed_response.get("reason", "No reason provided"))
+            "reason": str(parsed_response.get("reason", "No reason provided")),
         }
     except Exception as e:
         logger.error(f"Error processing response: {str(e)}", exc_info=True)
@@ -132,11 +181,13 @@ async def score(llm, student_ans: str, expected_ans: str, total_score: float, qu
             "rubric": "Error: Could not generate rubric",
             "breakdown": "Error: Could not generate breakdown",
             "score": 0.0,
-            "reason": f"Error: Error processing response: {str(e)}"
+            "reason": f"Error: Error processing response: {str(e)}",
         }
 
 
-async def generate_guidelines(llm, question: str, expected_ans: str, total_score: int = 5, errors=None) -> dict:
+async def generate_guidelines(
+    llm, question: str, expected_ans: str, total_score: int = 5, errors=None
+) -> dict:
     """
     Generate evaluation guidelines and criteria for a given question and expected answer.
 
@@ -147,11 +198,13 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
     :param errors: Any errors encountered during evaluation (optional)
     """
     if not question or not expected_ans:
-        logger.error("Provide a question and expected answer to generate evaluation rubric/guidelines")
+        logger.error(
+            "Provide a question and expected answer to generate evaluation rubric/guidelines"
+        )
         return {
             "status": 403,
             "guidelines": "Error: Provide a question and expected answer to generate evaluation rubric/guidelines",
-            "error": "Missing required parameters"
+            "error": "Missing required parameters",
         }
 
     # Define response schema for guidelines
@@ -162,30 +215,40 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
     format_instructions = guidelines_parser.get_format_instructions()
 
     prompt_template = PromptTemplate(
-        input_variables=['question', 'expected_ans', 'score', 'errors'],
+        input_variables=["question", "expected_ans", "score", "errors"],
         partial_variables={"format_instructions": format_instructions},
-        template=guidelines_template
+        template=guidelines_template,
     )
 
     _input = prompt_template.format(
-        question=question,
-        expected_ans=expected_ans,
-        score=total_score,
-        errors=errors
+        question=question, expected_ans=expected_ans, score=total_score, errors=errors
     )
 
-    response = None
+    response = parsed_response = None
     try:
-        response = await llm.ainvoke(_input)
-        if hasattr(response, 'content'):
-            response = response.content
-        elif not isinstance(response, str):
-            response = str(response)
-
-        parsed_response = guidelines_parser.parse(response)
+        for i in range(MAX_RETRIES + 1):
+            response = await llm.ainvoke(_input)
+            if hasattr(response, "content"):
+                response = response.content
+            elif not isinstance(response, str):
+                response = str(response)
+            try:
+                parsed_response = guidelines_parser.parse(response)
+            except Exception as e:
+                logger.debug("Detailed Stack Trace for below error", exc_info=True)
+                logger.warning(
+                    f"Retrying {i}/{MAX_RETRIES} because Unable to parse response error {str(e)}"
+                )
+            else:
+                if i > 0:
+                    logger.info(f"Successfully scored response after {i} attempt(s)")
+                break
+        assert parsed_response is not None, "Error: Failed to get/parse response"
         return {
             "status": 200,
-            "guidelines": str(parsed_response.get("guidelines", "No guidelines available"))
+            "guidelines": str(
+                parsed_response.get("guidelines", "No guidelines available")
+            ),
         }
     except Exception as e:
         logger.error(f"Error processing response: {str(e)}. {response=}", exc_info=True)
@@ -197,8 +260,8 @@ async def generate_guidelines(llm, question: str, expected_ans: str, total_score
                 question=question,
                 expected_ans=expected_ans,
                 score=total_score,
-                errors=errors
-            )
+                errors=errors,
+            ),
         }
 
 
@@ -216,31 +279,32 @@ async def enhance_question_and_answer(llm, question: str, expected_ans: str) -> 
             "status": 403,
             "enhanced_question": "Provide a question and expected answer to enhance the content",
             "enhanced_expected_ans": "Provide a question and expected answer to enhance the content",
-            "error": "Missing required parameters"
+            "error": "Missing required parameters",
         }
 
     # Define response schema for enhanced content
     enhanced_content_schema = [
         ResponseSchema(name="enhanced_question", description="The enhanced question"),
-        ResponseSchema(name="enhanced_expected_ans", description="The enhanced expected answer")
+        ResponseSchema(
+            name="enhanced_expected_ans", description="The enhanced expected answer"
+        ),
     ]
-    enhanced_content_parser = StructuredOutputParser.from_response_schemas(enhanced_content_schema)
+    enhanced_content_parser = StructuredOutputParser.from_response_schemas(
+        enhanced_content_schema
+    )
     format_instructions = enhanced_content_parser.get_format_instructions()
 
     prompt_template = PromptTemplate(
-        input_variables=['question', 'expected_ans'],
+        input_variables=["question", "expected_ans"],
         partial_variables={"format_instructions": format_instructions},
-        template=qa_enhancement_template
+        template=qa_enhancement_template,
     )
 
-    _input = prompt_template.format(
-        question=question,
-        expected_ans=expected_ans
-    )
+    _input = prompt_template.format(question=question, expected_ans=expected_ans)
 
     try:
         response = await llm.ainvoke(_input)
-        if hasattr(response, 'content'):
+        if hasattr(response, "content"):
             response = response.content
         elif not isinstance(response, str):
             response = str(response)
@@ -248,9 +312,16 @@ async def enhance_question_and_answer(llm, question: str, expected_ans: str) -> 
         parsed_response = enhanced_content_parser.parse(response)
         return {
             "status": 200,
-            "enhanced_question": str(parsed_response.get("enhanced_question", "No enhanced question available")),
+            "enhanced_question": str(
+                parsed_response.get(
+                    "enhanced_question", "No enhanced question available"
+                )
+            ),
             "enhanced_expected_ans": str(
-                parsed_response.get("enhanced_expected_ans", "No enhanced expected answer available"))
+                parsed_response.get(
+                    "enhanced_expected_ans", "No enhanced expected answer available"
+                )
+            ),
         }
     except Exception as e:
         logger.error(f"Error processing response: {str(e)}", exc_info=True)
@@ -258,11 +329,13 @@ async def enhance_question_and_answer(llm, question: str, expected_ans: str) -> 
             "status": 403,
             "enhanced_question": "Error processing response",
             "enhanced_expected_ans": "Error processing response",
-            "error": str(e)
+            "error": str(e),
         }
 
 
-async def score_fill_in_blank(llm, student_ans: str, expected_ans: str, total_score: float, question: str) -> dict:
+async def score_fill_in_blank(
+    llm, student_ans: str, expected_ans: str, total_score: float, question: str
+) -> dict:
     """
     Evaluate fill in the blank questions based on the expected answer and guidelines.
 
@@ -288,8 +361,13 @@ async def score_fill_in_blank(llm, student_ans: str, expected_ans: str, total_sc
 
     # Update response schemas to include 'rubric' and 'breakdown'
     response_schemas = [
-        ResponseSchema(name="reason", description="A short and concise reason for the assigned score"),
-        ResponseSchema(name="score", description="The assigned score as a floating point number"),
+        ResponseSchema(
+            name="reason",
+            description="A short and concise reason for the assigned score",
+        ),
+        ResponseSchema(
+            name="score", description="The assigned score as a floating point number"
+        ),
     ]
 
     output_parser = StructuredOutputParser.from_response_schemas(response_schemas)
@@ -297,39 +375,51 @@ async def score_fill_in_blank(llm, student_ans: str, expected_ans: str, total_sc
     question_section = f"\nQuestion:\n{question}\n" if question else "\n"
 
     prompt_template = PromptTemplate(
-        input_variables=['student_ans', 'expected_ans', 'total_score'],
+        input_variables=["student_ans", "expected_ans", "total_score"],
         partial_variables={
             "format_instructions": format_instructions,
             "question_section": question_section,
         },
-        template=fill_in_the_blank_template
+        template=fill_in_the_blank_template,
     )
 
     _input = prompt_template.format(
-        student_ans=student_ans,
-        expected_ans=expected_ans,
-        total_score=total_score
+        student_ans=student_ans, expected_ans=expected_ans, total_score=total_score
     )
 
+    response = parsed_response = None
     try:
-        response = await llm.ainvoke(_input)
-        if hasattr(response, 'content'):
-            response = response.content
-        elif not isinstance(response, str):
-            response = str(response)
-
-        parsed_response = output_parser.parse(response)
-        assert float(parsed_response.get("score", 0.0)) <= total_score, "Error: Score exceeds total score"
+        for i in range(MAX_RETRIES + 1):
+            response = await llm.ainvoke(_input)
+            if hasattr(response, "content"):
+                response = response.content
+            elif not isinstance(response, str):
+                response = str(response)
+            try:
+                parsed_response = output_parser.parse(response)
+            except Exception as e:
+                logger.debug("Detailed Stack Trace for below error", exc_info=True)
+                logger.warning(
+                    f"Retrying {i}/{MAX_RETRIES} because Unable to parse response error {str(e)}"
+                )
+            else:
+                if i > 0:
+                    logger.info(f"Successfully scored response after {i} attempt(s)")
+                break
+        assert parsed_response is not None, "Error: Failed to get/parse response"
+        assert float(parsed_response.get("score", 0.0)) <= total_score, (
+            "Error: Score exceeds total score"
+        )
         return {
             "score": float(parsed_response.get("score", 0.0)),
-            "reason": str(parsed_response.get("reason", "No reason provided"))
+            "reason": str(parsed_response.get("reason", "No reason provided")),
         }
     except Exception as e:
         logger.error(f"Error processing response: {str(e)}", exc_info=True)
         return {
             "status": 403,
             "score": 0.0,
-            "reason": f"Error: Error processing response: {str(e)}"
+            "reason": f"Error: Error processing response: {str(e)}",
         }
 
 
@@ -344,6 +434,10 @@ if __name__ == "__main__":
     my_student_ans = "Pariess"
     my_total_score = 1
     start = time.time()
-    result = asyncio.run(score_fill_in_blank(my_llm, my_student_ans, my_expected_ans, my_total_score, my_question))
+    result = asyncio.run(
+        score_fill_in_blank(
+            my_llm, my_student_ans, my_expected_ans, my_total_score, my_question
+        )
+    )
     print(f"Fill in the blank scoring took: {time.time() - start} seconds")
     print(result)
