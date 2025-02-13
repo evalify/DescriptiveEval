@@ -1,6 +1,7 @@
 langchain
 langchain-ollama
 langchain-groq
+langchain-openai
 python-dotenv
 psycopg2-binary
 pymongo

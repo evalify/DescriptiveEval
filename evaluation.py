@@ -796,7 +796,7 @@ async def bulk_evaluate_quiz_responses(
                                                 continue
                                             break
 
-                                        except Exception as e:
+                                        except Exception as e: #TODO: Handle Expected and Unexpected Errors properly
                                             error_msg = f"Unexpected error: {str(e)}"
                                             qlogger.warning(
                                                 f"Attempt {attempt + 1}/{MAX_RETRIES} failed for question {qid}. "

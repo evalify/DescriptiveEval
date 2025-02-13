@@ -447,6 +447,7 @@ async def score_fill_in_blank(
         return {
             "score": float(parsed_response.get("score", 0.0)),
             "reason": str(parsed_response.get("reason", "No reason provided")),
+            "status": EvaluationStatus.SUCCESS,
         }
     except Exception as e:
         logger.error(f"Error processing response: {str(e)}", exc_info=True)
