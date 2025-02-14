@@ -6,7 +6,9 @@ import asyncio
 import json
 import os
 from typing import Dict, Any, Optional
-
+import threading
+import psycopg2
+from psycopg2.errors import QueryCanceledError
 from dotenv import load_dotenv
 from redis import Redis
 
@@ -86,12 +88,13 @@ async def get_guidelines(
     return guidelines
 
 
-def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=True):
+def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=True, override_cache=False):
     """
       Get all responses for a quiz based on the quiz ID from the Cockroach database.
-
+      
       QuizResult Schema:
       [{
+
       "id": "cm5mbro5700br8pe36z0wh8ko",
       "studentId": "cm4tnp0o000b9dji9djqsjvfw",
       "quizId": "cm5ly4fgu00b28pe3sx17kiur",
@@ -117,9 +120,10 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
       :param redis_client: Redis client for caching
       :param quiz_id: The ID of the quiz to retrieve responses for
       :param save_to_file: Save the responses to a file (default: True)
+      :param override_cache: Override the cache and fetch fresh data (default: False)
     """
     cached_responses = redis_client.get(f"responses:{quiz_id}_responses_evalcache")
-    if cached_responses:
+    if cached_responses and not override_cache:
         print("Responses Cache hit!")
         save_quiz_data(json.loads(cached_responses), quiz_id, "responses")
         return json.loads(cached_responses)
@@ -144,7 +148,8 @@ def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=T
         save_quiz_data(quiz_responses, quiz_id, "responses")
     return quiz_responses
 
-async def set_quiz_responses(redis_client : Redis, quiz_id : str, responses : dict):
+
+async def set_quiz_responses(redis_client: Redis, quiz_id: str, responses: dict):
     """
     Update the cache with the evaluated results, using async thread.
 
@@ -159,57 +164,77 @@ async def set_quiz_responses(redis_client : Redis, quiz_id : str, responses : di
         ex=CACHE_EX,
     )
 
-async def set_quiz_response(cursor, conn, response: dict):
-    """
-    Update the database with the evaluated results, using async thread.
 
-    :param cursor: PostgresSQL cursor for database operations
-    :param conn: PostgresSQL connection for database operations
-    :param response: The evaluated response to update in the database
-    """
+async def set_quiz_response(cursor, conn, response: dict):
+    """Update database with evaluated results with proper timeout handling"""
+    timeout = 30  # seconds
     retries = 0
     max_retries = int(os.getenv("DB_MAX_RETRIES", 3))
+
     while retries < max_retries:
         try:
-            await asyncio.to_thread(
-                cursor.execute,
-                """UPDATE "QuizResult" 
-                   SET "responses" = %s, "score" = %s, "totalScore" = %s, "isEvaluated" = 'EVALUATED'
-                   WHERE "id" = %s""",
-                (
-                    json.dumps(response["responses"]),
-                    response["score"],
-                    response["totalScore"],
-                    response["id"],
-                ),
-            )
-            await asyncio.to_thread(conn.commit)
-            break
-        except Exception as e:
-            retries += 1
-            if retries == max_retries:
-                logger.error(
-                    f"Failed to update quiz response after {max_retries} retries: {str(e)}"
+            # Set statement timeout at session level
+            cursor.execute("SET LOCAL statement_timeout = %s", (timeout * 1000,))
+
+            async with asyncio.timeout(timeout):
+                cursor.execute(
+                    """UPDATE "QuizResult" 
+                       SET "responses" = %s::jsonb, 
+                           "score" = %s, 
+                           "totalScore" = %s, 
+                           "isEvaluated" = 'EVALUATED'
+                       WHERE "id" = %s""",
+                    (
+                        json.dumps(response["responses"]),
+                        response["score"],
+                        response["totalScore"],
+                        response["id"],
+                    ),
                 )
-                raise
-            wait_time = 2**retries  # Exponential backoff: 2,4,8 seconds
+                conn.commit()
+
+            logger.info(f"Successfully updated response {response['id']}")
+            return
+
+        except (asyncio.TimeoutError, QueryCanceledError) as e:
+            retries += 1
             logger.warning(
-                f"Retrying database update in {wait_time} seconds... (Attempt {retries}/{max_retries})"
+                f"Operation timed out/cancelled for response {response['id']} (attempt {retries}/{max_retries})"
             )
+            if retries == max_retries:
+                raise
+            wait_time = 2**retries
             await asyncio.sleep(wait_time)
 
+        except Exception as e:
+            retries += 1
+            logger.error(f"Error updating response {response['id']}: {str(e)}")
+            if retries == max_retries:
+                raise
+            wait_time = 2**retries
+            await asyncio.sleep(wait_time)
 
-def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=True):
+        finally:
+            # Ensure connection is in a clean state
+            try:
+                if conn.status != psycopg2.extensions.STATUS_READY:
+                    conn.rollback()
+            except:
+                pass
+
+
+def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=True, override_cache=False):
     """
     Get all questions for a quiz from MongoDB
     :param mongo_db: The MongoDB database object i.e, client[db]
-    :param redis_client: Redis client for caching
+    :param save_to_file: Save the questions to a file (default: True)
+    :param override_cache: Override the cache if set to True (default: False)
     :param quiz_id: The ID of the quiz to retrieve questions for
     :param save_to_file: Save the questions to a file (default: True)
     :param save_to_file: Save the questions to a file (default: True)
     """
     cached_questions = redis_client.get(f"questions:{quiz_id}_questions_evalcache")
-    if cached_questions:
+    if cached_questions and not override_cache:
         print("Questions Cache hit!")
         save_quiz_data(json.loads(cached_questions), quiz_id, "questions")
         return json.loads(cached_questions)

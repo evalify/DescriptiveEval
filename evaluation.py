@@ -4,14 +4,16 @@ This module contains functions to evaluate quiz responses in bulk using LLMs and
 
 import asyncio
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Dict, Optional
-import json
 from dotenv import load_dotenv
 from redis import Redis
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 import threading
+from utils.database import get_db_cursor, get_redis_client
+from contextlib import asynccontextmanager
+
 # Custom imports
 from utils.db_api import (
     get_quiz_responses,
@@ -30,9 +32,8 @@ from utils.errors import (
     ResponseQuestionMismatchError,
 )
 from utils.logger import logger, QuizLogger
-from utils.misc import DateTimeEncoder, save_quiz_data
+from utils.misc import save_quiz_data
 from utils.quiz.quiz_report import generate_quiz_report, save_quiz_report
-from utils.quiz.evaluation_logger import EvaluationLogger
 from utils.evaluation.evaluator import ResponseEvaluator
 
 load_dotenv()
@@ -169,6 +170,86 @@ async def bulk_evaluate_quiz_responses(
         # Initialize response evaluator
         evaluator = ResponseEvaluator(quiz_id, questions, evaluation_settings, llm)
 
+        # Create a thread pool for database operations
+        # thread_pool = ThreadPoolExecutor(max_workers=10)
+
+        @asynccontextmanager
+        async def get_db_connection():
+            """Async context manager for database connections"""
+            with get_db_cursor() as (cursor, conn):
+                yield cursor, conn
+
+        async def save_response(evaluated_result):
+            """Save a single response with its own database connection"""
+            async with get_db_connection() as (cursor, conn):
+                await set_quiz_response(cursor, conn, evaluated_result)
+
+        async def process_response(
+            quiz_result, index, questions, types_to_evaluate, evaluator, progress_bar
+        ):
+            """Process a single response with proper error handling, connection management, and monitoring"""
+            # start_time = time.monotonic()
+            # phase_times = {}
+
+            try:
+                qlogger.critical(f"Started processing response {index}")
+
+                # Validation phase
+                # validation_start = time.monotonic()
+                response_question_ids = set(quiz_result["responses"])
+                valid_question_ids = {str(q["_id"]) for q in questions}
+                invalid_questions = response_question_ids - valid_question_ids
+                if invalid_questions:
+                    raise ResponseQuestionMismatchError(quiz_id, invalid_questions)
+                # phase_times["validation"] = time.monotonic() - validation_start
+
+                # Evaluation phase
+                # eval_start = time.monotonic()
+                qlogger.critical(f"[Response {index}] Starting evaluation...")
+                evaluated_result = await evaluator.evaluate_response(
+                    quiz_result, types_to_evaluate
+                )
+                qlogger.critical(f"[Response {index}] Evaluation completed")
+                # phase_times["evaluation"] = time.monotonic() - eval_start
+
+                # Save phase
+                # save_start = time.monotonic()
+                qlogger.critical(f"[Response {index}] Starting database save...")
+                # with get_db_cursor() as (cursor, conn):
+                await set_quiz_response(pg_cursor, pg_conn, evaluated_result)
+                qlogger.critical(f"[Response {index}] Database save completed")
+                # phase_times["save"] = time.monotonic() - save_start
+
+                # total_time = time.monotonic() - start_time    # FIXME: This blocks execution!!!
+                # qlogger.info(
+                #     f"Response {index} completed in {timedelta(seconds=total_time):.2f}. "
+                #     f"Phases: validation={timedelta(seconds=phase_times['validation']):.2f}, "
+                #     f"evaluation={timedelta(seconds=phase_times['evaluation']):.2f}, "
+                #     f"save={timedelta(seconds=phase_times['save']):.2f}"
+                # )
+
+                # Update progress atomically
+                with threading.Lock():
+                    progress_bar.update(1)
+
+                return {
+                    "result": evaluated_result,
+                    "processing_time": 0,  # total_time, #FIXME:DO something!
+                    "phase_times": 0,  # phase_times,
+                }
+
+            except Exception as e:
+                logger.error(
+                    f"Error processing response {index}: {str(e)}", exc_info=True
+                )
+                # total_time = time.monotonic() - start_time
+                # qlogger.error(
+                #     f"Error processing response {index} after {timedelta(seconds=total_time):.2f}. "
+                #     f"Phase times: {phase_times}. Error: {str(e)}",
+                #     exc_info=True,
+                # )
+                return None
+
         with logging_redirect_tqdm(loggers=[logger]):
             tmp = []  # Filter Evaluated Responses
             for quiz_result in quiz_responses:
@@ -185,10 +266,10 @@ async def bulk_evaluate_quiz_responses(
                         quiz_result["isEvaluated"] = "UNEVALUATED"
 
                 tmp.append(quiz_result)
-            quiz_responses = tmp
+            unevaluated_quiz_responses = tmp
 
             progress_bar = tqdm(
-                quiz_responses,
+                unevaluated_quiz_responses,
                 desc=f"Evaluating {quiz_id}",
                 unit="response",
                 dynamic_ncols=True,
@@ -210,53 +291,101 @@ async def bulk_evaluate_quiz_responses(
             )
 
             EVAL_BATCH_SIZE = int(os.getenv("EVAL_BATCH_SIZE", 5))
-            total_responses = len(quiz_responses)
-            processed_results = []
+            BATCH_TIMEOUT = int(
+                os.getenv("BATCH_TIMEOUT", 300)
+            )  # 5 minutes timeout per batch
+            total_responses = len(unevaluated_quiz_responses)
+            # processed_results = []
+            batch_times = []
 
             # Process responses in batches
             for i in range(0, total_responses, EVAL_BATCH_SIZE):
-                batch = quiz_responses[i : i + EVAL_BATCH_SIZE]
-                tasks = []
-                for index, quiz_result in enumerate(batch, start=1):
-                    async def process_response(qr=quiz_result, index=index):
-                        try:
-                            print("Processing response ", index)
-                            # Validate response question IDs
-                            response_question_ids = set(qr["responses"])
-                            valid_question_ids = {str(q["_id"]) for q in questions}
-                            invalid_questions = response_question_ids - valid_question_ids
-                            if invalid_questions:
-                                raise ResponseQuestionMismatchError(
-                                    quiz_id, invalid_questions
-                                )
+                # batch_start = time.monotonic()
+                batch = unevaluated_quiz_responses[i : i + EVAL_BATCH_SIZE]
+                batch_number = i // EVAL_BATCH_SIZE + 1
+                qlogger.info(f"Starting batch {batch_number} ({len(batch)} responses)")
 
-                            # Evaluate single response
-                            evaluated_result = await evaluator.evaluate_response(
-                                qr, types_to_evaluate
-                            )
+                tasks = [
+                    process_response(
+                        quiz_result,
+                        index,
+                        questions,
+                        types_to_evaluate,
+                        evaluator,
+                        progress_bar,
+                    )
+                    for index, quiz_result in enumerate(batch, start=i + 1)
+                ]
 
-                            # Save result back to Redis and database
-                            print("Saving response ", index)
-                            await set_quiz_response(pg_cursor, pg_conn, evaluated_result)   # pool this!!
-                            qlogger.info(
-                                f"Response {evaluated_result['id']} evaluated. Final score: {evaluated_result['score']}"
-                            )
+                # Process batch with timeout
+                try:
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    progress_bar.refresh()
+                    # processed_results.extend(batch_results)
+                    # batch_results = await asyncio.wait_for(
+                    #     asyncio.gather(*tasks, return_exceptions=True),
+                    #     timeout=BATCH_TIMEOUT,
+                    # )
 
+                    # # Process results and collect statistics
+                    # valid_results = []
+                    # batch_stats = {
+                    #     "total": len(batch_results),
+                    #     "successful": 0,
+                    #     "failed": 0,
+                    #     "avg_time": 0,
+                    #     "max_time": 0,
+                    # }
 
-                            with threading.Lock():
-                                progress_bar.update(1)
+                    # for result in batch_results:
+                    #     if result and not isinstance(result, Exception):
+                    #         valid_results.append(result["result"])
+                    #         batch_stats["successful"] += 1
+                    #         batch_stats["avg_time"] += result["processing_time"]
+                    #         batch_stats["max_time"] = max(
+                    #             batch_stats["max_time"], result["processing_time"]
+                    #         )
+                    #     else:
+                    #         batch_stats["failed"] += 1
 
-                            print("Response processed", index)
-                        except Exception:
-                            print("Error in process_response", index)
-                            return None
-                        else:
-                            return evaluated_result
+                    # if batch_stats["successful"] > 0:
+                    #     batch_stats["avg_time"] /= batch_stats["successful"]
 
-                    tasks.append(process_response())
-                batch_results = await asyncio.gather(*tasks)
-                processed_results.extend(batch_results)
+                    # batch_time = time.monotonic() - batch_start
+                    # batch_times.append(batch_time)
+
+                    # qlogger.info(
+                    #     f"Batch {batch_number} completed in {timedelta(seconds=batch_time):.2f}. "
+                    #     f"Success: {batch_stats['successful']}/{batch_stats['total']}, "
+                    #     f"Avg time: {timedelta(seconds=batch_stats['avg_time']):.2f}, "
+                    #     f"Max time: {timedelta(seconds=batch_stats['max_time']):.2f}"
+                    # )
+
+                    #
+
+                except asyncio.TimeoutError:
+                    qlogger.error(
+                        f"Batch {batch_number} timed out after {BATCH_TIMEOUT} seconds"
+                    )
+                    # Don't raise here, continue with next batch
+                except Exception as e:
+                    qlogger.error(
+                        f"Batch {batch_number} failed: {str(e)}", exc_info=True
+                    )
+                    continue
+
                 time_taken = progress_bar.format_dict.get("elapsed", 0)
+
+        # Log overall statistics
+        if batch_times:
+            avg_batch_time = sum(batch_times) / len(batch_times)
+            max_batch_time = max(batch_times)
+            qlogger.info(
+                f"Evaluation completed. "
+                f"Total batches: {len(batch_times)}, "
+                f"Avg batch time: {timedelta(seconds=avg_batch_time):.2f}, "
+                f"Max batch time: {timedelta(seconds=max_batch_time):.2f}"
+            )
 
     except Exception as e:
         qlogger.error(f"Evaluation failed: {str(e)}", exc_info=True)
@@ -317,6 +446,7 @@ async def bulk_evaluate_quiz_responses(
             )
 
     finally:
+        # thread_pool.shutdown()
         if save_to_file:
             qlogger.info("Saving final evaluation results")
             save_quiz_data(quiz_responses, quiz_id, "responses_evaluated")

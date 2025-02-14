@@ -5,6 +5,7 @@ This module contains the core evaluation logic that was previously in evaluation
 
 import os
 import itertools
+import threading
 from datetime import datetime
 from typing import Optional, Dict, Any
 from model import get_llm, score, score_fill_in_blank, EvaluationStatus, LLMProvider
@@ -47,7 +48,8 @@ class ResponseEvaluator:
         self.llm = llm
         self.qlogger = QuizLogger(quiz_id)
 
-        # Initialize metadata storage
+        # Thread-safe metadata handling
+        self._metadata_lock = threading.Lock()
         self.evaluation_metadata = {
             "quiz_id": quiz_id,
             "start_time": datetime.now().isoformat(),
@@ -61,17 +63,8 @@ class ResponseEvaluator:
             "responses": {},
         }
 
-        # Pre-calculate question type distribution
-        for q in questions:
-            q_type = q.get("type", "UNKNOWN").upper()
-            if q_type not in self.evaluation_metadata["aggregates"]["question_types"]:
-                self.evaluation_metadata["aggregates"]["question_types"][q_type] = 0
-            self.evaluation_metadata["aggregates"]["question_types"][q_type] += 1
-
-        # Extract settings
-        self.negative_marking = self.evaluation_settings.get("negativeMark", False)
-        self.mcq_partial_marking = self.evaluation_settings.get("mcqPartialMark", True)
-
+        # Thread-safe LLM key rotation
+        self._llm_lock = threading.Lock()
         if llm is None:
             self.qlogger.info(
                 "No LLM instance provided. Using default Groq API key rotation"
@@ -83,97 +76,116 @@ class ResponseEvaluator:
             self.valid_keys = [key for key in keys if key]
             if not self.valid_keys:
                 raise ValueError("No valid API keys found for evaluation")
-            self.groq_api_keys = itertools.cycle(self.valid_keys)
+            self._key_iter = itertools.cycle(self.valid_keys)
             self.qlogger.info(
                 f"Using {len(self.valid_keys)} API keys in rotation for evaluation"
             )
 
+        # Extract settings
+        self.negative_marking = self.evaluation_settings.get("negativeMark", False)
+        self.mcq_partial_marking = self.evaluation_settings.get("mcqPartialMark", True)
+
+    def _get_next_api_key(self):
+        """Thread-safe API key rotation"""
+        with self._llm_lock:
+            return next(self._key_iter)
+
     def _update_llm_stats(self, provider: str, duration: float):
-        """Update LLM usage statistics"""
-        self.evaluation_metadata["aggregates"]["llm_usage"]["total_calls"] += 1
-        self.evaluation_metadata["aggregates"]["llm_usage"]["total_duration"] += (
-            duration
-        )
-        if (
-            provider
-            not in self.evaluation_metadata["aggregates"]["llm_usage"]["providers"]
-        ):
-            self.evaluation_metadata["aggregates"]["llm_usage"]["providers"][
+        """Thread-safe LLM statistics update"""
+        with self._metadata_lock:
+            self.evaluation_metadata["aggregates"]["llm_usage"]["total_calls"] += 1
+            self.evaluation_metadata["aggregates"]["llm_usage"]["total_duration"] += (
+                duration
+            )
+            if (
                 provider
-            ] = {"calls": 0, "total_duration": 0}
-        self.evaluation_metadata["aggregates"]["llm_usage"]["providers"][provider][
-            "calls"
-        ] += 1
-        self.evaluation_metadata["aggregates"]["llm_usage"]["providers"][provider][
-            "total_duration"
-        ] += duration
+                not in self.evaluation_metadata["aggregates"]["llm_usage"]["providers"]
+            ):
+                self.evaluation_metadata["aggregates"]["llm_usage"]["providers"][
+                    provider
+                ] = {"calls": 0, "total_duration": 0}
+            self.evaluation_metadata["aggregates"]["llm_usage"]["providers"][provider][
+                "calls"
+            ] += 1
+            self.evaluation_metadata["aggregates"]["llm_usage"]["providers"][provider][
+                "total_duration"
+            ] += duration
 
     def _update_error_stats(self, error_type: str):
-        """Update error statistics"""
-        self.evaluation_metadata["aggregates"]["errors"]["total"] += 1
-        if (
-            error_type
-            not in self.evaluation_metadata["aggregates"]["errors"]["by_type"]
-        ):
-            self.evaluation_metadata["aggregates"]["errors"]["by_type"][error_type] = 0
-        self.evaluation_metadata["aggregates"]["errors"]["by_type"][error_type] += 1
+        """Thread-safe error statistics update"""
+        with self._metadata_lock:
+            self.evaluation_metadata["aggregates"]["errors"]["total"] += 1
+            if (
+                error_type
+                not in self.evaluation_metadata["aggregates"]["errors"]["by_type"]
+            ):
+                self.evaluation_metadata["aggregates"]["errors"]["by_type"][
+                    error_type
+                ] = 0
+            self.evaluation_metadata["aggregates"]["errors"]["by_type"][error_type] += 1
 
     def _save_metadata(self):
         """Save evaluation metadata to file with final aggregates"""
         end_time = datetime.now()
-        self.evaluation_metadata.update(
-            {
-                "end_time": end_time.isoformat(),
-                "total_duration": (
-                    end_time
-                    - datetime.fromisoformat(self.evaluation_metadata["start_time"])
-                ).total_seconds(),
-                "aggregates": {
-                    **self.evaluation_metadata["aggregates"],
-                    "success_rate": {
-                        "total": sum(
-                            1
-                            for r in self.evaluation_metadata["responses"].values()
-                            for q in r.values()
-                            if isinstance(q, dict) and q.get("evaluationStatus")
-                            == EvaluationStatus.SUCCESS.value
-                        ),
-                        "by_type": {},
+        with self._metadata_lock:
+            self.evaluation_metadata.update(
+                {
+                    "end_time": end_time.isoformat(),
+                    "total_duration": (
+                        end_time
+                        - datetime.fromisoformat(self.evaluation_metadata["start_time"])
+                    ).total_seconds(),
+                    "aggregates": {
+                        **self.evaluation_metadata["aggregates"],
+                        "success_rate": {
+                            "total": sum(
+                                1
+                                for r in self.evaluation_metadata["responses"].values()
+                                for q in r.values()
+                                if isinstance(q, dict)
+                                and q.get("evaluationStatus")
+                                == EvaluationStatus.SUCCESS.value
+                            ),
+                            "by_type": {},
+                        },
                     },
-                },
-            }
-        )
-
-        # Calculate success rates by question type
-        for q_type in self.evaluation_metadata["aggregates"]["question_types"]:
-            successes = sum(
-                1
-                for r in self.evaluation_metadata["responses"].values()
-                for q in r.values()
-                if isinstance(q, dict) and q.get("questionType") == q_type
-                and q.get("evaluationStatus") == EvaluationStatus.SUCCESS.value
+                }
             )
-            total = self.evaluation_metadata["aggregates"]["question_types"][q_type]
-            self.evaluation_metadata["aggregates"]["success_rate"]["by_type"][
-                q_type
-            ] = {
-                "success": successes,
-                "total": total,
-                "rate": successes / total if total > 0 else 0,
-            }
 
-        save_quiz_data(self.evaluation_metadata, self.quiz_id, "evaluation_metadata")
+            # Calculate success rates by question type
+            for q_type in self.evaluation_metadata["aggregates"]["question_types"]:
+                successes = sum(
+                    1
+                    for r in self.evaluation_metadata["responses"].values()
+                    for q in r.values()
+                    if isinstance(q, dict)
+                    and q.get("questionType") == q_type
+                    and q.get("evaluationStatus") == EvaluationStatus.SUCCESS.value
+                )
+                total = self.evaluation_metadata["aggregates"]["question_types"][q_type]
+                self.evaluation_metadata["aggregates"]["success_rate"]["by_type"][
+                    q_type
+                ] = {
+                    "success": successes,
+                    "total": total,
+                    "rate": successes / total if total > 0 else 0,
+                }
+
+            save_quiz_data(self.evaluation_metadata, self.quiz_id, "evaluation_metadata")
 
     def _update_response_metadata(
         self, response_id: str, question_id: str, metadata: dict
     ):
-        """Update metadata for a specific response and question"""
-        if response_id not in self.evaluation_metadata["responses"]:
-            self.evaluation_metadata["responses"][response_id] = {}
-        if question_id not in self.evaluation_metadata["responses"][response_id]:
-            self.evaluation_metadata["responses"][response_id][question_id] = {}
+        """Thread-safe metadata update"""
+        with self._metadata_lock:
+            if response_id not in self.evaluation_metadata["responses"]:
+                self.evaluation_metadata["responses"][response_id] = {}
+            if question_id not in self.evaluation_metadata["responses"][response_id]:
+                self.evaluation_metadata["responses"][response_id][question_id] = {}
 
-        self.evaluation_metadata["responses"][response_id][question_id].update(metadata)
+            self.evaluation_metadata["responses"][response_id][question_id].update(
+                metadata
+            )
 
     async def evaluate_response(
         self,
@@ -200,10 +212,11 @@ class ResponseEvaluator:
             }
 
         response_id = quiz_result["id"]
-        self.evaluation_metadata["responses"][response_id] = {
-            "student_id": quiz_result.get("studentId"),
-            "start_time": datetime.now().isoformat(),
-            "questions": {},
+        with self._metadata_lock:
+            self.evaluation_metadata["responses"][response_id] = {
+                "student_id": quiz_result.get("studentId"),
+                "start_time": datetime.now().isoformat(),
+                "questions": {},
         }
 
         self.qlogger.info(
@@ -230,7 +243,7 @@ class ResponseEvaluator:
                 raise InvalidQuestionError(
                     f"Question {qid} is missing required 'mark'/'marks' attribute"
                 )
-            
+
             # Skip question if no response found
             if qid not in quiz_result["responses"]:
                 self.qlogger.warning(f"No response found for question {qid}")
@@ -247,8 +260,6 @@ class ResponseEvaluator:
                 )
                 continue
 
-
-
             # Evaluate question based on type
             try:
                 evaluation_metadata = {
@@ -258,7 +269,11 @@ class ResponseEvaluator:
                 }
 
                 await self._evaluate_question(
-                    quiz_result, qid, question, evaluation_metadata, question_total_score
+                    quiz_result,
+                    qid,
+                    question,
+                    evaluation_metadata,
+                    question_total_score,
                 )
 
             except Exception as e:
@@ -294,7 +309,7 @@ class ResponseEvaluator:
         qid: str,
         question: Dict[str, Any],
         evaluation_metadata: Dict[str, Any],
-        question_total_score : float
+        question_total_score: float,
     ):
         """Evaluate a single question within a response."""
         response_id = quiz_result["id"]
@@ -308,8 +323,6 @@ class ResponseEvaluator:
             "evaluationAttempts": 0,
         }
         self._update_response_metadata(response_id, qid, evaluation_metadata)
-
-
 
         match question_type:
             case "MCQ":
@@ -374,7 +387,7 @@ class ResponseEvaluator:
             QuizResponseSchema.set_attribute(
                 quiz_result, qid, "remarks", "No answer provided"
             )
-            self._update_response_metadata(
+            self._update_response_metad(
                 response_id,
                 qid,
                 {
@@ -439,12 +452,11 @@ class ResponseEvaluator:
         self, quiz_result, qid, question, question_total_score
     ):
         """Evaluate descriptive type question"""
-        response_id = quiz_result["id"]
+        # response_id = quiz_result["id"]
         clean_question = remove_html_tags(question["question"]).strip()
         student_answer = QuizResponseSchema.get_attribute(
             quiz_result, qid, "student_answer"
         )[0]
-
         if await direct_match(
             student_answer, question["expectedAnswer"], strip=True, case_sensitive=False
         ):
@@ -454,21 +466,21 @@ class ResponseEvaluator:
                 "breakdown": "Exact Match - LLM not used",
                 "status": EvaluationStatus.SUCCESS,
             }
-            self._update_response_metadata(
-                response_id,
-                qid,
-                {
-                    "evaluationStatus": EvaluationStatus.SUCCESS.value,
-                    "evaluationMethod": "exact_match",
-                    "duration": 0,
-                },
-            )
+            # self._update_response_metadata(
+            #     response_id,
+            #     qid,
+            #     {
+            #         "evaluationStatus": EvaluationStatus.SUCCESS.value,
+            #         "evaluationMethod": "exact_match",
+            #         "duration": 0,
+            #     },
+            # )
         else:
-            start_time = datetime.now()
+            # start_time = datetime.now()
             current_llm = (
                 self.llm
                 if self.llm
-                else get_llm(LLMProvider.GROQ, next(self.groq_api_keys))
+                else get_llm(LLMProvider.GROQ, self._get_next_api_key())
             )
             errors = []
             last_response = None
@@ -489,7 +501,7 @@ class ResponseEvaluator:
                         EvaluationStatus.INVALID_INPUT,
                         EvaluationStatus.EMPTY_ANSWER,
                     ]:
-                        self._update_error_stats("INVALID_INPUT")
+                        # self._update_error_stats("INVALID_INPUT")
                         break
 
                     # Continue retrying for server-side errors
@@ -497,14 +509,15 @@ class ResponseEvaluator:
                         break
 
                     errors.append(score_res.get("error", "Unknown error"))
-                    self._update_error_stats("LLM_ERROR")
+                    # self._update_error_stats("LLM_ERROR")
 
                 except Exception as e:
                     errors.append(str(e))
-                    self._update_error_stats("LLM_EXCEPTION")
+                    # self._update_error_stats("LLM_EXCEPTION")
                     if attempt == MAX_RETRIES - 1:
                         raise LLMEvaluationError(qid, errors)
-                    current_llm = get_llm(LLMProvider.GROQ, next(self.groq_api_keys))
+                    if not self.llm: 
+                        current_llm = get_llm(LLMProvider.GROQ, next(self.groq_api_keys))
 
             score_res = last_response
             if not score_res or score_res.get("status") != EvaluationStatus.SUCCESS:
@@ -516,24 +529,24 @@ class ResponseEvaluator:
                         "status": EvaluationStatus.LLM_ERROR,
                     }
 
-            self._update_response_metadata(
-                response_id,
-                qid,
-                {
-                    "evaluationStatus": score_res.get(
-                        "status", EvaluationStatus.LLM_ERROR
-                    ).value,
-                    "evaluationMethod": "llm",
-                    "llmProvider": current_llm.__class__.__name__,
-                    "evaluationAttempts": attempt + 1 if "attempt" in locals() else 0,
-                    "errors": errors if errors else None,
-                    "duration": (datetime.now() - start_time).total_seconds(),
-                },
-            )
-            self._update_llm_stats(
-                current_llm.__class__.__name__,
-                (datetime.now() - start_time).total_seconds(),
-            )
+            # self._update_response_metadata(
+            #     response_id,
+            #     qid,
+            #     {
+            #         "evaluationStatus": score_res.get(
+            #             "status", EvaluationStatus.LLM_ERROR
+            #         ).value,
+            #         "evaluationMethod": "llm",
+            #         "llmProvider": current_llm.__class__.__name__,
+            #         "evaluationAttempts": attempt + 1 if "attempt" in locals() else 0,
+            #         "errors": errors if errors else None,
+            #         "duration": (datetime.now() - start_time).total_seconds(),
+            #     },
+            # )
+            # self._update_llm_stats(
+            #     current_llm.__class__.__name__,
+            #     (datetime.now() - start_time).total_seconds(),
+            # )
 
         QuizResponseSchema.set_attribute(quiz_result, qid, "score", score_res["score"])
         QuizResponseSchema.set_attribute(
@@ -740,7 +753,7 @@ class ResponseEvaluator:
             current_llm = (
                 self.llm
                 if self.llm
-                else get_llm(LLMProvider.GROQ, next(self.groq_api_keys))
+                else get_llm(LLMProvider.GROQ, self._get_next_api_key())
             )
             clean_question = remove_html_tags(question["question"]).strip()
 
@@ -777,7 +790,9 @@ class ResponseEvaluator:
                     evaluation_attempts.append(str(e))
                     self._update_error_stats("LLM_EXCEPTION")
                     if attempt == MAX_RETRIES - 1:
-                        raise FillInBlankEvaluationError(qid, evaluation_attempts, MAX_RETRIES)
+                        raise FillInBlankEvaluationError(
+                            qid, evaluation_attempts, MAX_RETRIES
+                        )
                     current_llm = get_llm(LLMProvider.GROQ, next(self.groq_api_keys))
 
             fitb_score = last_response
@@ -800,6 +815,7 @@ class ResponseEvaluator:
                     "llmProvider": current_llm.__class__.__name__,
                     "evaluationAttempts": attempt + 1 if "attempt" in locals() else 0,
                     "errors": evaluation_attempts if evaluation_attempts else None,
+                    "evaluationErrors": evaluation_attempts if evaluation_attempts else None,
                     "duration": {
                         "total": (datetime.now() - start_time).total_seconds(),
                         "llm": (datetime.now() - llm_start_time).total_seconds(),
