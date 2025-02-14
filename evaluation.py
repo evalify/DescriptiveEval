@@ -20,7 +20,7 @@ from utils.db_api import (
     get_evaluation_settings,
     get_all_questions,
     set_quiz_response,
-    get_guidelines
+    get_guidelines,
 )
 from utils.errors import (
     NoQuestionsError,
@@ -228,11 +228,13 @@ async def bulk_evaluate_quiz_responses(
                 # Evaluation phase
                 # eval_start = time.monotonic()
                 qlogger.info(f"[Response {index}] Starting evaluation...")
-                desc_eval_time = float(os.getenv("DESC_EVAL_TIME", 20)) # Worst Case
+                desc_eval_time = float(os.getenv("DESC_EVAL_TIME", 20))  # Worst Case
                 fitb_eval_time = float(os.getenv("FITB_EVAL_TIME", 20))
                 num_desc = question_count_by_type.get("DESCRIPTIVE", 0)
                 num_fitb = question_count_by_type.get("FILL_IN_BLANK", 0)
-                computed_timeout = max((num_desc * desc_eval_time) + (num_fitb * fitb_eval_time), 90) 
+                computed_timeout = max(
+                    (num_desc * desc_eval_time) + (num_fitb * fitb_eval_time), 90
+                )
                 for attempt in range(int(os.getenv("EVAL_MAX_RETRIES", 10))):
                     try:
 
@@ -249,7 +251,6 @@ async def bulk_evaluate_quiz_responses(
                                     f"[Response {index}] Heartbeat: Evaluation still running"
                                 )
                             return await task
-
 
                         evaluated_result = await asyncio.wait_for(
                             asyncio.shield(eval_with_heartbeat()),
@@ -308,22 +309,21 @@ async def bulk_evaluate_quiz_responses(
                 return None
 
         with logging_redirect_tqdm(loggers=[logger]):
-            tmp = []  # Filter Evaluated Responses
+            unevaluated_quiz_responses = []  # Filter Evaluated Responses
+            evaluated_quiz_responses = []  # Store Evaluated Responses
             for quiz_result in quiz_responses:
                 if quiz_result.get("isEvaluated") == "EVALUATED":
                     if not override_evaluated:
                         qlogger.info(
                             f"Skipping evaluation for already evaluated quiz response {quiz_result['id']}"
                         )
-                        continue
+                        evaluated_quiz_responses.append(quiz_result)
                     else:
                         qlogger.info(
                             f"Re-evaluating quiz response {quiz_result['id']} due to override flag"
                         )
                         quiz_result["isEvaluated"] = "UNEVALUATED"
-
-                tmp.append(quiz_result)
-            unevaluated_quiz_responses = tmp
+                        unevaluated_quiz_responses.append(quiz_result)
 
             progress_bar = tqdm(
                 unevaluated_quiz_responses,
@@ -443,6 +443,9 @@ async def bulk_evaluate_quiz_responses(
                 f"Avg batch time: {timedelta(seconds=avg_batch_time):.2f}, "
                 f"Max batch time: {timedelta(seconds=max_batch_time):.2f}"
             )
+
+        # Add the evaluated responses to the main list, for the sake of saving to file and generating report
+        quiz_responses = evaluated_quiz_responses + unevaluated_quiz_responses
 
     except Exception as e:
         qlogger.error(f"Evaluation failed: {str(e)}", exc_info=True)

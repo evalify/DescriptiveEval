@@ -463,6 +463,7 @@ class ResponseEvaluator:
             score_res = {
                 "score": question_total_score,
                 "reason": "Exact Match",
+                "rubric" : "Exact Match - LLM not used",
                 "breakdown": "Exact Match - LLM not used",
                 "status": EvaluationStatus.SUCCESS,
             }
@@ -526,6 +527,7 @@ class ResponseEvaluator:
                     score_res = {
                         "score": 0,
                         "reason": f"Multiple evaluation attempts failed: {', '.join(errors)}",
+                        "rubric": "Evaluation failed after maximum retries",
                         "breakdown": "Evaluation failed after maximum retries",
                         "status": EvaluationStatus.LLM_ERROR,
                     }

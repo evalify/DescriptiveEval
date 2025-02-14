@@ -50,7 +50,7 @@ def get_llm(provider: LLMProvider = LLMProvider.GROQ, api_key=None, model_name=N
         return ChatOpenAI(
             model_name=model_name or "meta-llama/Meta-Llama-3.1-8B-Instruct",
             base_url=os.getenv("VLLM_HOST", "http://localhost:8000"),
-            temperature=0.2,
+            temperature=0.4,
             api_key=api_key or "123",
         )
 
@@ -116,18 +116,18 @@ async def score(
     response_schemas = [
         ResponseSchema(
             name="rubric",
-            description="The evaluation rubric as a markdown formatted string",
+            description="The evaluation rubric as a markdown formatted string - you are just stating the general evaluation criteria",
+        ),
+        ResponseSchema(
+            name="breakdown",
+            description="Detailed breakdown of the allocated marks as a markdown formatted string, along with the reasoning behind each criterion's score",
         ),
         ResponseSchema(
             name="score", description="The assigned score as a floating point number"
         ),
         ResponseSchema(
             name="reason",
-            description="A short and concise reason for the assigned score",
-        ),
-        ResponseSchema(
-            name="breakdown",
-            description="Detailed breakdown of the allocated marks as a markdown formatted string",
+            description="A Detailed Reason for the assigned score",
         ),
     ]
 
