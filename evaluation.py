@@ -20,7 +20,7 @@ from utils.db_api import (
     get_evaluation_settings,
     get_all_questions,
     set_quiz_response,
-    set_quiz_responses,
+    get_guidelines
 )
 from utils.errors import (
     NoQuestionsError,
@@ -32,7 +32,7 @@ from utils.errors import (
     ResponseQuestionMismatchError,
 )
 from utils.logger import logger, QuizLogger
-from utils.misc import save_quiz_data
+from utils.misc import save_quiz_data, remove_html_tags
 from utils.quiz.quiz_report import generate_quiz_report, save_quiz_report
 from utils.evaluation.evaluator import ResponseEvaluator
 
@@ -163,9 +163,31 @@ async def bulk_evaluate_quiz_responses(
         evaluation_settings = get_evaluation_settings(pg_cursor, quiz_id)
 
         # Count questions by type
+        descriptive_tasks = []
+        descriptive_questions = []
         for question in questions:
             q_type = question.get("type", "UNKNOWN").upper()
             question_count_by_type[q_type] = question_count_by_type.get(q_type, 0) + 1
+            # If question is Descriptive, check if it has guidelines
+            if q_type == "DESCRIPTIVE" and not question.get("guidelines"):
+                qlogger.warning(
+                    f"Descriptive question {question['_id']} has no evaluation guidelines. Generating..."
+                )
+                descriptive_questions.append(question)
+                descriptive_tasks.append(
+                    get_guidelines(
+                        redis_client=redis_client,
+                        question_id=question["_id"],
+                        llm=llm,
+                        question=remove_html_tags(question["question"]).strip(),
+                        expected_answer=question["expectedAnswer"],
+                        total_score=question.get("marks", question.get("mark", 0)),
+                    )
+                )
+        if descriptive_tasks:
+            guidelines_results = await asyncio.gather(*descriptive_tasks)
+            for question, guidelines in zip(descriptive_questions, guidelines_results):
+                question["guidelines"] = guidelines
 
         # Initialize response evaluator
         evaluator = ResponseEvaluator(quiz_id, questions, evaluation_settings, llm)
@@ -206,6 +228,11 @@ async def bulk_evaluate_quiz_responses(
                 # Evaluation phase
                 # eval_start = time.monotonic()
                 qlogger.info(f"[Response {index}] Starting evaluation...")
+                desc_eval_time = float(os.getenv("DESC_EVAL_TIME", 20)) # Worst Case
+                fitb_eval_time = float(os.getenv("FITB_EVAL_TIME", 20))
+                num_desc = question_count_by_type.get("DESCRIPTIVE", 0)
+                num_fitb = question_count_by_type.get("FILL_IN_BLANK", 0)
+                computed_timeout = max((num_desc * desc_eval_time) + (num_fitb * fitb_eval_time), 90) 
                 for attempt in range(int(os.getenv("EVAL_MAX_RETRIES", 10))):
                     try:
 
@@ -223,13 +250,14 @@ async def bulk_evaluate_quiz_responses(
                                 )
                             return await task
 
+
                         evaluated_result = await asyncio.wait_for(
                             asyncio.shield(eval_with_heartbeat()),
-                            timeout=120,
+                            timeout=computed_timeout,
                         )
                     except asyncio.TimeoutError:
                         qlogger.error(
-                            f"[Response {index}] Evaluation timed out. Retrying {attempt + 1}"
+                            f"[Response {index}] Evaluation timed out (>{computed_timeout}). Retrying {attempt + 1}"
                         )
                         continue
                     else:

@@ -492,6 +492,7 @@ class ResponseEvaluator:
                         question=clean_question,
                         student_ans=student_answer,
                         expected_ans=question["expectedAnswer"],
+                        guidelines=question["guidelines"],
                         total_score=question_total_score,
                     )
                     last_response = score_res

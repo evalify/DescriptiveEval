@@ -187,7 +187,7 @@ async def score(
 
         assert parsed_response is not None, "Error: Failed to get/parse response"
         assert float(parsed_response.get("score", 0.0)) <= total_score, (
-            "Error: Score exceeds total score"
+            f"Error: Score exceeds total score Given {total_score=} but Got {parsed_response.get('score', 0.0)}"
         )
 
         # Add success status if not present
@@ -204,7 +204,7 @@ async def score(
             "status": parsed_response.get("status", EvaluationStatus.SUCCESS),
         }
     except Exception as e:
-        logger.error(f"Error processing response: {str(e)}", exc_info=True)
+        logger.warning(f"Error processing response: {str(e)}")
         with open("logs/score_error.log", "a") as f:
             f.write(f"Error: {str(e)}\n")
             f.write(f"Response: {response}\n\n-----------------\n\n")
@@ -442,15 +442,16 @@ async def score_fill_in_blank(
                 break
         assert parsed_response is not None, "Error: Failed to get/parse response"
         assert float(parsed_response.get("score", 0.0)) <= total_score, (
-            "Error: Score exceeds total score"
+            f"Error: Score exceeds total score Given {total_score=} but Got {parsed_response.get('score', 0.0)}"
         )
+        
         return {
             "score": float(parsed_response.get("score", 0.0)),
             "reason": str(parsed_response.get("reason", "No reason provided")),
             "status": EvaluationStatus.SUCCESS,
         }
     except Exception as e:
-        logger.error(f"Error processing response: {str(e)}", exc_info=True)
+        logger.warning(f"Error processing response: {str(e)}")
         return {
             "score": 0.0,
             "reason": f"Error: Error processing response: {str(e)}",
