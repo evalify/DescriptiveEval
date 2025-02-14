@@ -86,7 +86,7 @@ async def bulk_evaluate_quiz_responses(
     llm=None,
     override_evaluated: bool = False,
     types_to_evaluate: Optional[Dict[str, bool]] = None,
-    override_cache : bool = False,
+    override_cache: bool = False,
 ):
     """
     Evaluate all responses for a quiz with rubric caching and parallel processing.
@@ -192,7 +192,7 @@ async def bulk_evaluate_quiz_responses(
             # phase_times = {}
 
             try:
-                qlogger.critical(f"Started processing response {index}")
+                qlogger.debug(f"Started processing response {index}")
 
                 # Validation phase
                 # validation_start = time.monotonic()
@@ -205,19 +205,48 @@ async def bulk_evaluate_quiz_responses(
 
                 # Evaluation phase
                 # eval_start = time.monotonic()
-                qlogger.critical(f"[Response {index}] Starting evaluation...")
-                evaluated_result = await evaluator.evaluate_response(
-                    quiz_result, types_to_evaluate
-                )
-                qlogger.critical(f"[Response {index}] Evaluation completed")
+                qlogger.info(f"[Response {index}] Starting evaluation...")
+                for attempt in range(int(os.getenv("EVAL_MAX_RETRIES", 10))):
+                    try:
+
+                        async def eval_with_heartbeat():
+                            task = asyncio.create_task(
+                                evaluator.evaluate_response(
+                                    quiz_result, types_to_evaluate
+                                )
+                            )
+                            heartbeat_interval = 10  # seconds between heartbeat logs
+                            while not task.done():
+                                await asyncio.sleep(heartbeat_interval)
+                                qlogger.debug(
+                                    f"[Response {index}] Heartbeat: Evaluation still running"
+                                )
+                            return await task
+
+                        evaluated_result = await asyncio.wait_for(
+                            asyncio.shield(eval_with_heartbeat()),
+                            timeout=90,
+                        )
+                    except asyncio.TimeoutError:
+                        qlogger.error(
+                            f"[Response {index}] Evaluation timed out. Retrying {attempt + 1}"
+                        )
+                        continue
+                    else:
+                        break
+                else:
+                    raise TimeoutError(
+                        f"Failed to evaluate response {index} after {attempt + 1} attempts"
+                    )
+                qlogger.info(f"[Response {index}] Evaluation completed")
                 # phase_times["evaluation"] = time.monotonic() - eval_start
 
                 # Save phase
                 # save_start = time.monotonic()
-                qlogger.critical(f"[Response {index}] Starting database save...")
+                qlogger.debug(f"[Response {index}] Starting database save...")
                 # with get_db_cursor() as (cursor, conn):
                 await set_quiz_response(pg_cursor, pg_conn, evaluated_result)
-                qlogger.critical(f"[Response {index}] Database save completed")
+                qlogger.debug(f"[Response {index}] Database save completed")
                 # phase_times["save"] = time.monotonic() - save_start
 
                 # total_time = time.monotonic() - start_time    # FIXME: This blocks execution!!!
