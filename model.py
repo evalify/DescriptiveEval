@@ -103,7 +103,7 @@ async def score(
         }
 
     if not student_ans or student_ans.strip() == "":
-        logger.error("Student answer is empty or missing")
+        logger.warning("Student answer is empty or missing")
         return {
             "rubric": "Error: Student answer is empty or missing",
             "breakdown": "Error: Student answer is empty or missing",
@@ -378,7 +378,7 @@ async def score_fill_in_blank(
     :param question: The question
     """
     if not expected_ans or expected_ans.strip() == "":
-        logger.error("Expected answer is empty or missing")
+        logger.warning("Expected answer is empty or missing")
         return {
             "score": 0.0,
             "reason": "Error: Expected answer is empty or missing",
@@ -386,7 +386,7 @@ async def score_fill_in_blank(
         }
 
     if not student_ans or student_ans.strip() == "":
-        logger.error("Student answer is empty or missing")
+        logger.warning("Student answer is empty or missing")
         return {
             "score": 0.0,
             "reason": "Error: Student answer is empty or missing",

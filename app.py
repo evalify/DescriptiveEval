@@ -319,6 +319,7 @@ class EvalRequest(BaseModel):
     quiz_id: str
     override_evaluated: bool = False
     override_locked: bool = False
+    override_cache: bool = False
     types_to_evaluate: Optional[Dict[str, bool]] = {
         "MCQ": True,
         "DESCRIPTIVE": True,
@@ -538,6 +539,7 @@ async def evaluate_bulk_queue(
             app.state.current_api_key,
             request.override_evaluated,
             request.types_to_evaluate,
+            request.override_cache,
             job_timeout=int(os.getenv("WORKER_TTL", "3600")),
         )
         logger.info(

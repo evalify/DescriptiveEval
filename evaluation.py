@@ -85,6 +85,7 @@ async def bulk_evaluate_quiz_responses(
     llm=None,
     override_evaluated: bool = False,
     types_to_evaluate: Optional[Dict[str, bool]] = None,
+    override_cache : bool = False,
 ):
     """
     Evaluate all responses for a quiz with rubric caching and parallel processing.
@@ -105,7 +106,6 @@ async def bulk_evaluate_quiz_responses(
     """
     # Initialize loggers
     qlogger = QuizLogger(quiz_id)
-    eval_logger = EvaluationLogger(quiz_id)
     qlogger.info(f"Starting evaluation for quiz {quiz_id}")
     qlogger.info(
         f"Evaluation parameters: override_evaluated={override_evaluated}, types_to_evaluate={types_to_evaluate}"
@@ -139,12 +139,14 @@ async def bulk_evaluate_quiz_responses(
                 redis_client=redis_client,
                 quiz_id=quiz_id,
                 save_to_file=save_to_file,
+                override_cache=override_cache,
             )
             questions = get_all_questions(
                 mongo_db=mongo_db,
                 redis_client=redis_client,
                 quiz_id=quiz_id,
                 save_to_file=save_to_file,
+                override_cache=override_cache,
             )
             qlogger.info(
                 f"Retrieved {len(quiz_responses)} responses and {len(questions)} questions"

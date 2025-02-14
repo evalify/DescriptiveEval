@@ -2,7 +2,7 @@ import asyncio
 
 from evaluation import bulk_evaluate_quiz_responses
 from model import get_llm
-from utils.database import get_postgres_cursor, get_mongo_client, get_redis_client
+from utils.database import get_db_cursor, get_mongo_client, get_redis_client
 from utils.errors import (
     NoQuestionsError,
     InvalidQuestionError,
@@ -71,6 +71,7 @@ async def evaluation_job(
     model_api_key,
     override_evaluated=False,
     types_to_evaluate=None,
+    override_cache=False,
 ):
     """Execute the evaluation job for the given quiz ID."""
     job_id = f"eval_{quiz_id}_{model_name}"
@@ -80,7 +81,7 @@ async def evaluation_job(
         f"Job parameters: provider={model_provider}, model={model_name}, override={override_evaluated}, types={types_to_evaluate}"
     )
 
-    pg_cursor = pg_conn = None
+    # pg_cursor = pg_conn = None
     redis_client = get_redis_client()
 
     # Create a lock for this quiz
@@ -100,7 +101,7 @@ async def evaluation_job(
             }
 
         # Initialize connections
-        pg_cursor, pg_conn = get_postgres_cursor()
+        # pg_cursor, pg_conn = get_postgres_cursor()
         mongo_db = get_mongo_client()
         qlogger.debug(f"Database connections established for job {job_id}")
 
@@ -113,17 +114,19 @@ async def evaluation_job(
         # else, llm is None => Use Groq API Cycling
 
         async def execute_evaluation():
-            result = await bulk_evaluate_quiz_responses(
-                quiz_id,
-                pg_cursor,
-                pg_conn,
-                mongo_db,
-                redis_client,
-                save_to_file=True,
-                llm=llm,
-                override_evaluated=override_evaluated,
-                types_to_evaluate=types_to_evaluate,
-            )
+            with get_db_cursor() as (cursor, conn):
+                result = await bulk_evaluate_quiz_responses(
+                    quiz_id,
+                    cursor,
+                    conn,
+                    mongo_db,
+                    redis_client,
+                    save_to_file=True,
+                    llm=llm,
+                    override_evaluated=override_evaluated,
+                    types_to_evaluate=types_to_evaluate,
+                    override_cache=override_cache,
+                )
             return {
                 "status": "success",
                 "message": "Evaluation complete",
@@ -142,14 +145,3 @@ async def evaluation_job(
     finally:
         # Release the lock in finally block to ensure it's released even if an error occurs
         quiz_lock.release()
-
-        if pg_cursor and pg_conn:
-            try:
-                pg_cursor.close()
-                pg_conn.close()
-                qlogger.debug(f"Database connections closed for job {job_id}")
-            except Exception as e:
-                qlogger.error(
-                    f"Failed to close database connections for job {job_id}: {str(e)}"
-                )
-                logger.error(f"Job {job_id}: Failed to close database connections")
