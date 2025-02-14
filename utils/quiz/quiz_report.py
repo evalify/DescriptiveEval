@@ -51,6 +51,7 @@ async def generate_quiz_report(
     :param questions: List of questions in the quiz
     :return: Quiz report
     """
+    assert len(quiz_results) > 0, "No quiz results found"
     qlogger = QuizLogger(quiz_id)
     qlogger.debug(
         f"Starting report generation with {len(quiz_results)} results and {len(questions)} questions"

@@ -318,12 +318,14 @@ async def bulk_evaluate_quiz_responses(
                             f"Skipping evaluation for already evaluated quiz response {quiz_result['id']}"
                         )
                         evaluated_quiz_responses.append(quiz_result)
+                        continue
                     else:
                         qlogger.info(
                             f"Re-evaluating quiz response {quiz_result['id']} due to override flag"
                         )
                         quiz_result["isEvaluated"] = "UNEVALUATED"
-                        unevaluated_quiz_responses.append(quiz_result)
+
+                unevaluated_quiz_responses.append(quiz_result)
 
             progress_bar = tqdm(
                 unevaluated_quiz_responses,
