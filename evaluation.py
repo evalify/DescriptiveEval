@@ -225,7 +225,7 @@ async def bulk_evaluate_quiz_responses(
 
                         evaluated_result = await asyncio.wait_for(
                             asyncio.shield(eval_with_heartbeat()),
-                            timeout=90,
+                            timeout=120,
                         )
                     except asyncio.TimeoutError:
                         qlogger.error(

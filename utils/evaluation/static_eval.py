@@ -19,7 +19,7 @@ async def evaluate_mcq_with_partial_marking(student_answers: List[str], correct_
         else:
             return 0
         
-    return total_score * (correct_count / len(correct_answers))
+    return round(total_score * (correct_count / len(correct_answers)), 2)
     
 
 async def evaluate_true_false(student_answer: str, correct_answer: str, total_score: float) -> float:
