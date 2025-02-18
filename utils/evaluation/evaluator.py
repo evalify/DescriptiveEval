@@ -387,7 +387,7 @@ class ResponseEvaluator:
             QuizResponseSchema.set_attribute(
                 quiz_result, qid, "remarks", "No answer provided"
             )
-            self._update_response_metad(
+            self._update_response_metadata(
                 response_id,
                 qid,
                 {

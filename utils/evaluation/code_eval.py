@@ -24,7 +24,7 @@ async def evaluate_coding_question(student_response: str, driver_code: str, test
     :param test_cases_count: Number of test cases that are in the driver code for validation (optional)
     """
     if not student_response:
-        print(f"⚠️ No response submitted")
+        print("⚠️ No response submitted")
         return 0
 
     code_index = student_response.rfind('% Driver Code')
@@ -40,11 +40,11 @@ async def evaluate_coding_question(student_response: str, driver_code: str, test
                 return -1, -1
 
             if passed_cases == total_cases and total_cases > 0:
-                print(f"✓ All test cases passed")
+                print("✓ All test cases passed")
             return passed_cases, total_cases
-        print(f"❌ No output received")
+        print("❌ No output received")
     except requests.exceptions.ReadTimeout:
-        print(f'❌ Unable to evaluate code - Timeout')
+        print('❌ Unable to evaluate code - Timeout')
     except Exception as e:
         print(f'❌ Error evaluating code: {str(e)}')
 

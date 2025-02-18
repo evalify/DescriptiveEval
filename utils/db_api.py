@@ -6,7 +6,6 @@ import asyncio
 import json
 import os
 from typing import Dict, Any, Optional
-import threading
 import psycopg2
 from psycopg2.errors import QueryCanceledError
 from dotenv import load_dotenv
@@ -219,7 +218,7 @@ async def set_quiz_response(cursor, conn, response: dict):
             try:
                 if conn.status != psycopg2.extensions.STATUS_READY:
                     conn.rollback()
-            except:
+            except Exception:
                 pass
 
 

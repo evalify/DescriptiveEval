@@ -26,7 +26,6 @@ from utils.errors import (
     NoQuestionsError,
     NoResponsesError,
     InvalidQuestionError,
-    TotalScoreError,
     DatabaseConnectionError,
     EvaluationError,
     ResponseQuestionMismatchError,

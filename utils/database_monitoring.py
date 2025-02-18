@@ -1,10 +1,8 @@
 """Monitoring utilities for database operations"""
 
 import time
-from datetime import datetime
 from typing import Dict, Any, Optional
 from threading import Lock
-import psycopg2
 from utils.logger import logger
 
 

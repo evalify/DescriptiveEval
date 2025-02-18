@@ -211,7 +211,7 @@ def safe_transaction(cursor, conn, timeout: int = 30):
             logger.warning(f"Transaction attempt {attempt + 1} failed: {str(e)}")
             try:
                 conn.rollback()
-            except:
+            except Exception:
                 pass
                 
             attempt += 1
