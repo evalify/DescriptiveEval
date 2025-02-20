@@ -331,7 +331,7 @@ class EvalRequest(BaseModel):
 
 @app.get("/")
 async def read_index():
-    return FileResponse("static/index.html")
+    return FileResponse("static/index.html", media_type="text/html")
 
 
 def get_llm_dependency():
@@ -495,6 +495,11 @@ async def evaluate_bulk(request: EvalRequest, llm=Depends(get_llm_dependency)):
         postgres_cursor.close()
         postgres_conn.close()
 
+@app.get("/evaluate/status/{quiz_id}")
+async def get_evaluation_status(quiz_id: str):
+    from random import choice
+    # Not Implemented yet, feel free to change return schema
+    return {"quiz_id": quiz_id, "status": choice(["evaluating","completed","failed"]), "evaluated_responses" : 10, "total_responses": 20}
 
 @app.post("/evaluate")
 async def evaluate_bulk_queue(

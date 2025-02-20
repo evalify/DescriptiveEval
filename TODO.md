@@ -2,11 +2,14 @@
 
 ## RealTime
 
-- [ ] Fix empty response from student is considered critical and kills the evaluation
+- [ ] Modularize Code in app.py, check [link](https://www.perplexity.ai/search/how-to-seperate-fastapi-app-sa-g3nbxnGiSVuFmxorRrnWEA)
+- [ ] Add dynamic batch size for evaluation
+- [ ] Dashboard for monitoring evaluations
+- [ ] Add polling for evaluation status
+- [x] Fix empty response from student is considered critical and kills the evaluation
 
 ## High Priority
 
-- [ ] Modularize Code in app.py, check [link](https://www.perplexity.ai/search/how-to-seperate-fastapi-app-sa-g3nbxnGiSVuFmxorRrnWEA)
 - [ ] Add API for retrieving available models (Hard-Coded but validated from list of available models in ollama)
 - [ ] Add model selection support
 - [x] Add QuizReport aka Statistics - follow schema refer [route](https://github.com/Aksaykanthan/evalify/blob/main/src/app/api/staff/result/route.ts)

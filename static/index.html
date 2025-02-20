@@ -1,137 +1,448 @@
 <!DOCTYPE html>
 <html lang="en" data-theme="light">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="color-scheme" content="light dark">
-    <title>DescEval - AI-Powered Descriptive Answer Evaluation</title>
-    <link rel="stylesheet" href="/static/style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Fira+Code&display=swap" rel="stylesheet">
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-</head>
-<body>
-    <div class="container">
-        <!-- Hero Section -->
-        <div class="hero">
-            <div class="logo">DescEval</div>
-            <p>AI-powered descriptive answer evaluation for quick, accurate, and consistent grading.</p>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DescEval Dashboard</title>
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+    <link
+      rel="stylesheet"
+      href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css"
+    />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="static/style.css" />
+  </head>
+  <body>
+    <div class="container-fluid">
+      <nav class="navbar navbar-expand-lg mb-4">
+        <div class="container-fluid">
+          <a class="navbar-brand text-primary fw-bold brand-title" href="#">
+            DescEval
+          </a>
+          <div class="d-flex align-items-center gap-4">
+            <button class="theme-switch" id="themeSwitch" title="Toggle theme">
+              <i class="bi bi-sun-fill"></i>
+            </button>
+            <span class="nav-item nav-link" id="currentTime"></span>
+          </div>
         </div>
+      </nav>
 
-        <div class="tabs">
-            <button class="tab active" data-tab="score-tab">Score Answer</button>
-            <button class="tab" data-tab="guidelines-tab">Generate Guidelines</button>
-            <button class="tab" data-tab="enhance-tab">Enhance Q&A</button>
-            <button class="tab" data-tab="evaluate-tab">Bulk Evaluate</button>
-        </div>
+      <ul class="nav nav-tabs mb-4" role="tablist">
+        <li class="nav-item">
+          <a
+            class="nav-link active"
+            data-bs-toggle="tab"
+            href="#evaluationPanel"
+          >
+            <i class="bi bi-speedometer2"></i> Evaluation Dashboard
+          </a>
+        </li>
+        <li class="nav-item">
+          <a class="nav-link" data-bs-toggle="tab" href="#llmTestPanel">
+            <i class="bi bi-robot"></i> LLM Testing
+          </a>
+        </li>
+      </ul>
 
-        <!-- Score Tab -->
-        <div id="score-tab" class="tab-content active">
-            <div class="content-wrapper">
-                <div class="form-section">
-                    <form id="score-form">
-                        <div class="form-group">
-                            <label for="score-question">Question</label>
-                            <textarea id="score-question" name="question" rows="2"></textarea>
-                        </div>
-                        <div class="form-group">
-                            <label for="score-expected-ans">Expected Answer</label>
-                            <textarea id="score-expected-ans" name="expected_ans" rows="3" required></textarea>
-                        </div>
-                        <div class="form-group">
-                            <label for="score-student-ans">Student Answer</label>
-                            <textarea id="score-student-ans" name="student_ans" rows="3" required></textarea>
-                        </div>
-                        <div class="form-group">
-                            <label for="score-total">Total Score</label>
-                            <input type="number" id="score-total" name="total_score" required min="1">
-                        </div>
-                        <div class="form-group">
-                            <label for="score-guidelines">Guidelines (Optional)</label>
-                            <textarea id="score-guidelines" name="guidelines" rows="2"></textarea>
-                        </div>
-                        <button type="submit">Score Answer</button>
-                    </form>
+      <div class="tab-content">
+        <!-- Evaluation Dashboard Panel -->
+        <div class="tab-pane fade show active" id="evaluationPanel">
+          <div class="row">
+            <!-- Active Evaluations -->
+            <div class="col-md-6 mb-4">
+              <div class="card fade-in h-100">
+                <div class="card-header">
+                  <h5 class="card-title mb-0">
+                    <i class="bi bi-lightning-charge"></i> Active Evaluations
+                  </h5>
                 </div>
-                <div class="result-section">
-                    <div id="score-loading" class="loading">Processing...</div>
-                    <pre id="score-result" class="result"></pre>
+                <div class="card-body">
+                  <div id="activeEvaluations" class="evaluation-list">
+                    <div
+                      id="emptyEvaluationState"
+                      class="empty-state text-center"
+                    >
+                      <div class="empty-state-icon mb-3">👏</div>
+                      <h5>No Quizzes are being evaluated</h5>
+                    </div>
+                  </div>
                 </div>
+              </div>
             </div>
-        </div>
 
-        <!-- Guidelines Tab -->
-        <div id="guidelines-tab" class="tab-content">
-            <div class="content-wrapper">
-                <div class="form-section">
-                    <form id="guidelines-form">
-                        <div class="form-group">
-                            <label for="guidelines-question">Question</label>
-                            <textarea id="guidelines-question" name="question" rows="2" required></textarea>
-                        </div>
-                        <div class="form-group">
-                            <label for="guidelines-expected-ans">Expected Answer</label>
-                            <textarea id="guidelines-expected-ans" name="expected_ans" rows="3" required></textarea>
-                        </div>
-                        <div class="form-group">
-                            <label for="guidelines-total">Total Score</label>
-                            <input type="number" id="guidelines-total" name="total_score" value="10">
-                        </div>
-                        <button type="submit">Generate Guidelines</button>
-                    </form>
+            <!-- Worker Status -->
+            <div class="col-md-6 mb-4">
+              <div class="card fade-in h-100">
+                <div
+                  class="card-header d-flex justify-content-between align-items-center"
+                >
+                  <h5 class="card-title mb-0">
+                    <i class="bi bi-cpu"></i> Worker Status
+                  </h5>
+                  <span class="badge bg-primary" id="workerCount"
+                    >0 Active</span
+                  >
                 </div>
-                <div class="result-section">
-                    <div id="generate-guidelines-loading" class="loading">Processing...</div>
-                    <pre id="generate-guidelines-result" class="result"></pre>
+                <div class="card-body">
+                  <div id="workerList" class="worker-list">
+                    <!-- Worker status items will be inserted here -->
+                  </div>
                 </div>
+              </div>
             </div>
-        </div>
+          </div>
 
-        <!-- Enhance Tab -->
-        <div id="enhance-tab" class="tab-content">
-            <div class="content-wrapper">
-                <div class="form-section">
-                    <form id="enhance-form">
-                        <div class="form-group">
-                            <label for="enhance-question">Question</label>
-                            <textarea id="enhance-question" name="question" rows="2" required></textarea>
-                        </div>
-                        <div class="form-group">
-                            <label for="enhance-expected-ans">Expected Answer</label>
-                            <textarea id="enhance-expected-ans" name="expected_ans" rows="3" required></textarea>
-                        </div>
-                        <button type="submit">Enhance Q&A</button>
-                    </form>
+          <div class="row">
+            <!-- Queue Information -->
+            <div class="col-md-12 mb-4">
+              <div class="card fade-in">
+                <div class="card-header">
+                  <ul class="nav nav-tabs card-header-tabs" role="tablist">
+                    <li class="nav-item">
+                      <a
+                        class="nav-link active"
+                        data-bs-toggle="tab"
+                        href="#queuedJobs"
+                      >
+                        <i class="bi bi-hourglass-split"></i> Queued
+                      </a>
+                    </li>
+                    <li class="nav-item">
+                      <a
+                        class="nav-link"
+                        data-bs-toggle="tab"
+                        href="#failedJobs"
+                      >
+                        <i class="bi bi-x-circle"></i> Failed
+                      </a>
+                    </li>
+                    <li class="nav-item">
+                      <a
+                        class="nav-link"
+                        data-bs-toggle="tab"
+                        href="#completedJobs"
+                      >
+                        <i class="bi bi-check-circle"></i> Completed
+                      </a>
+                    </li>
+                  </ul>
                 </div>
-                <div class="result-section">
-                    <div id="enhance-qa-loading" class="loading">Processing...</div>
-                    <pre id="enhance-qa-result" class="result"></pre>
+                <div class="card-body">
+                  <div class="tab-content">
+                    <div class="tab-pane fade show active" id="queuedJobs">
+                      <div class="table-responsive">
+                        <table class="table table-hover">
+                          <thead>
+                            <tr>
+                              <th>Job ID</th>
+                              <th>Quiz ID</th>
+                              <th>Enqueued At</th>
+                              <th>Status</th>
+                              <th>Worker PID</th>
+                              <th>Actions</th>
+                            </tr>
+                          </thead>
+                          <tbody id="queuedJobsList"></tbody>
+                        </table>
+                      </div>
+                    </div>
+                    <div class="tab-pane fade" id="failedJobs">
+                      <div class="table-responsive">
+                        <table class="table table-hover">
+                          <thead>
+                            <tr>
+                              <th>Job ID</th>
+                              <th>Quiz ID</th>
+                              <th>Failed At</th>
+                              <th>Error Message</th>
+                            </tr>
+                          </thead>
+                          <tbody id="failedJobsList"></tbody>
+                        </table>
+                      </div>
+                    </div>
+                    <div class="tab-pane fade" id="completedJobs">
+                      <div class="table-responsive">
+                        <table class="table table-hover">
+                          <thead>
+                            <tr>
+                              <th>Job ID</th>
+                              <th>Quiz ID</th>
+                              <th>Completed At</th>
+                              <th>Duration</th>
+                            </tr>
+                          </thead>
+                          <tbody id="completedJobsList"></tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
                 </div>
+              </div>
             </div>
+          </div>
         </div>
 
-        <!-- Evaluate Tab -->
-        <div id="evaluate-tab" class="tab-content">
-            <div class="content-wrapper">
-                <div class="form-section">
-                    <form id="evaluate-form">
-                        <div class="form-group">
-                            <label for="evaluate-quiz-id">Quiz ID</label>
-                            <input type="text" id="evaluate-quiz-id" name="quiz_id" required>
-                        </div>
-                        <button type="submit">Evaluate Quiz</button>
-                    </form>
+        <!-- LLM Testing Panel -->
+        <div class="tab-pane fade" id="llmTestPanel">
+          <div class="row">
+            <!-- Provider Settings -->
+            <div class="col-md-6 mb-4">
+              <div class="card fade-in">
+                <div class="card-header">
+                  <h5 class="card-title mb-0">
+                    <i class="bi bi-gear"></i> Provider Settings
+                  </h5>
                 </div>
-                <div class="result-section">
-                    <div id="evaluate-loading" class="loading">Processing...</div>
-                    <pre id="evaluate-result" class="result"></pre>
+                <div class="card-body">
+                  <form id="providerForm" class="llm-test-panel">
+                    <div class="llm-form-group">
+                      <label class="form-label">Provider</label>
+                      <select
+                        class="form-select llm-form-control"
+                        id="provider"
+                      >
+                        <option value="openai">OpenAI</option>
+                        <option value="anthropic">Anthropic</option>
+                        <option value="google">Google</option>
+                      </select>
+                    </div>
+                    <div class="llm-form-group">
+                      <label class="form-label">Model Name</label>
+                      <input
+                        type="text"
+                        class="form-control llm-form-control"
+                        id="modelName"
+                      />
+                    </div>
+                    <div class="llm-form-group">
+                      <label class="form-label">API Key</label>
+                      <input
+                        type="password"
+                        class="form-control llm-form-control"
+                        id="apiKey"
+                      />
+                    </div>
+                    <button type="submit" class="btn btn-primary">
+                      Update Provider
+                    </button>
+                  </form>
                 </div>
+              </div>
             </div>
-        </div>
 
-        <div class="footer">
-            Made by Evalify Team
+            <!-- Test Endpoints -->
+            <div class="col-md-6 mb-4">
+              <div class="card fade-in">
+                <div class="card-header">
+                  <h5 class="card-title mb-0">
+                    <i class="bi bi-lightning"></i> Test Endpoints
+                  </h5>
+                </div>
+                <div class="card-body">
+                  <div class="nav nav-pills mb-3" role="tablist">
+                    <button
+                      class="nav-link active"
+                      data-bs-toggle="pill"
+                      data-bs-target="#scoreTest"
+                    >
+                      Score
+                    </button>
+                    <button
+                      class="nav-link"
+                      data-bs-toggle="pill"
+                      data-bs-target="#guidelinesTest"
+                    >
+                      Guidelines
+                    </button>
+                    <button
+                      class="nav-link"
+                      data-bs-toggle="pill"
+                      data-bs-target="#enhanceTest"
+                    >
+                      Enhance Q&A
+                    </button>
+                  </div>
+
+                  <div class="tab-content">
+                    <!-- Score Testing -->
+                    <div class="tab-pane fade show active" id="scoreTest">
+                      <form id="scoreForm" class="llm-test-panel">
+                        <div class="llm-form-group">
+                          <label class="form-label">Question</label>
+                          <textarea
+                            class="form-control llm-form-control"
+                            id="scoreQuestion"
+                            rows="3"
+                          ></textarea>
+                        </div>
+                        <div class="llm-form-group">
+                          <label class="form-label">Student Answer</label>
+                          <textarea
+                            class="form-control llm-form-control"
+                            id="studentAnswer"
+                            rows="3"
+                          ></textarea>
+                        </div>
+                        <div class="llm-form-group">
+                          <label class="form-label">Expected Answer</label>
+                          <textarea
+                            class="form-control llm-form-control"
+                            id="expectedAnswer"
+                            rows="3"
+                          ></textarea>
+                        </div>
+                        <div class="llm-form-group">
+                          <label class="form-label">Total Score</label>
+                          <input
+                            type="number"
+                            class="form-control llm-form-control"
+                            id="totalScore"
+                          />
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                          Test Scoring
+                        </button>
+                      </form>
+                    </div>
+
+                    <!-- Guidelines Testing -->
+                    <div class="tab-pane fade" id="guidelinesTest">
+                      <form id="guidelinesForm" class="llm-test-panel">
+                        <div class="llm-form-group">
+                          <label class="form-label">Question</label>
+                          <textarea
+                            class="form-control llm-form-control"
+                            id="guidelinesQuestion"
+                            rows="3"
+                          ></textarea>
+                        </div>
+                        <div class="llm-form-group">
+                          <label class="form-label">Expected Answer</label>
+                          <textarea
+                            class="form-control llm-form-control"
+                            id="guidelinesExpectedAnswer"
+                            rows="3"
+                          ></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                          Generate Guidelines
+                        </button>
+                      </form>
+                    </div>
+
+                    <!-- Enhance Q&A Testing -->
+                    <div class="tab-pane fade" id="enhanceTest">
+                      <form id="enhanceForm" class="llm-test-panel">
+                        <div class="llm-form-group">
+                          <label class="form-label">Question</label>
+                          <textarea
+                            class="form-control llm-form-control"
+                            id="enhanceQuestion"
+                            rows="3"
+                          ></textarea>
+                        </div>
+                        <div class="llm-form-group">
+                          <label class="form-label">Expected Answer</label>
+                          <textarea
+                            class="form-control llm-form-control"
+                            id="enhanceExpectedAnswer"
+                            rows="3"
+                          ></textarea>
+                        </div>
+                        <button type="submit" class="btn btn-primary">
+                          Enhance Q&A
+                        </button>
+                      </form>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Results Panel -->
+          <div class="row">
+            <div class="col-12">
+              <div class="card fade-in">
+                <div class="card-header">
+                  <h5 class="card-title mb-0">
+                    <i class="bi bi-card-text"></i> Test Results
+                  </h5>
+                </div>
+                <div class="card-body">
+                  <pre
+                    id="testResults"
+                    class="llm-form-control"
+                    style="max-height: 400px; overflow-y: auto"
+                  ></pre>
+                </div>
+              </div>
+            </div>
+          </div>
         </div>
+      </div>
     </div>
-    <script src="/static/script.js"></script>
-</body>
+
+    <!-- Worker Kill Confirmation Modal -->
+    <div class="modal fade" id="killWorkerModal" tabindex="-1">
+      <div class="modal-dialog">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h5 class="modal-title">Worker Action</h5>
+            <button
+              type="button"
+              class="btn-close"
+              data-bs-dismiss="modal"
+              aria-label="Close"
+            ></button>
+          </div>
+          <div class="modal-body">
+            <p>Select action for Worker <span id="workerPidDisplay"></span>:</p>
+            <div class="mb-3">
+              <!-- Radio options will be dynamically inserted here -->
+            </div>
+            <div class="mb-3">
+              <div class="form-check">
+                <input
+                  class="form-check-input"
+                  type="checkbox"
+                  id="spawnReplacement"
+                  checked
+                />
+                <label class="form-check-label" for="spawnReplacement">
+                  Spawn Replacement Worker
+                </label>
+              </div>
+            </div>
+          </div>
+          <div class="modal-footer">
+            <button
+              type="button"
+              class="btn btn-secondary"
+              data-bs-dismiss="modal"
+            >
+              Cancel
+            </button>
+            <button type="button" class="btn btn-danger" id="confirmKillWorker">
+              Confirm Action
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toasts container for notifications -->
+    <div class="toast-container position-fixed bottom-0 end-0 p-3"></div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="static/script.js"></script>
+  </body>
 </html>
