@@ -2,6 +2,7 @@ import asyncio
 import os
 import time
 import uuid
+import json
 from contextlib import asynccontextmanager
 from typing import Optional, Dict
 
@@ -496,10 +497,30 @@ async def evaluate_bulk(request: EvalRequest, llm=Depends(get_llm_dependency)):
         postgres_conn.close()
 
 @app.get("/evaluate/status/{quiz_id}")
-async def get_evaluation_status(quiz_id: str):
-    from random import choice
-    # Not Implemented yet, feel free to change return schema
-    return {"quiz_id": quiz_id, "status": choice(["evaluating","completed","failed"]), "evaluated_responses" : 10, "total_responses": 20}
+async def get_evaluation_status(quiz_id: str, redis_client=Depends(get_redis_client)):
+    """
+    Retrieve the evaluation progress status for a given quiz.
+
+    Args:
+        quiz_id (str): Identifier of the quiz.
+        redis_client: A Redis client dependency for accessing cached progress data.
+
+    Returns:
+        dict: A dictionary containing the quiz_id and either the progress details or a message.
+    """
+    progress = redis_client.get(f"quiz_progress:{quiz_id}")
+    
+    if progress:
+        try:
+            progress = json.loads(progress)
+        except json.JSONDecodeError as e:
+            logger.error(f"Error decoding JSON for quiz {quiz_id} while checking status: {str(e)}")
+            return {"quiz_id": quiz_id, "message": "Invalid progress data"}
+        
+        return {"quiz_id": quiz_id, **(progress or {})}
+    
+    return {"quiz_id": quiz_id, "message": "No Evaluation is Running"}
+    
 
 @app.post("/evaluate")
 async def evaluate_bulk_queue(
