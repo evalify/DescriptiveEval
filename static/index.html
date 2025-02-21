@@ -34,18 +34,31 @@
         </div>
       </nav>
 
-      <ul class="nav nav-tabs mb-4" role="tablist">
-        <li class="nav-item">
+      <!-- Fix tab list roles -->
+      <ul class="nav nav-tabs mb-4" role="tablist" aria-label="Main navigation">
+        <li class="nav-item" role="presentation">
           <a
             class="nav-link active"
+            id="evaluationTab"
             data-bs-toggle="tab"
             href="#evaluationPanel"
+            role="tab"
+            aria-controls="evaluationPanel"
+            aria-selected="true"
           >
             <i class="bi bi-speedometer2"></i> Evaluation Dashboard
           </a>
         </li>
-        <li class="nav-item">
-          <a class="nav-link" data-bs-toggle="tab" href="#llmTestPanel">
+        <li class="nav-item" role="presentation">
+          <a
+            class="nav-link"
+            id="llmTestTab"
+            data-bs-toggle="tab"
+            href="#llmTestPanel"
+            role="tab"
+            aria-controls="llmTestPanel"
+            aria-selected="false"
+          >
             <i class="bi bi-robot"></i> LLM Testing
           </a>
         </li>
@@ -58,10 +71,15 @@
             <!-- Active Evaluations -->
             <div class="col-md-6 mb-4">
               <div class="card fade-in h-100">
-                <div class="card-header">
+                <div
+                  class="card-header d-flex justify-content-between align-items-center"
+                >
                   <h5 class="card-title mb-0">
                     <i class="bi bi-lightning-charge"></i> Active Evaluations
                   </h5>
+                  <span class="badge bg-primary" id="activeEvalCount"
+                    >0 Active</span
+                  >
                 </div>
                 <div class="card-body">
                   <div id="activeEvaluations" class="evaluation-list">
@@ -69,13 +87,50 @@
                       id="emptyEvaluationState"
                       class="empty-state text-center"
                     >
-                      <div class="empty-state-icon mb-3">👏</div>
+                      <div class="empty-state-icon mb-3">🌬️</div>
                       <h5>No Quizzes are being evaluated</h5>
+                      <p class="text-muted">
+                        Active evaluations will appear here
+                      </p>
                     </div>
                   </div>
                 </div>
               </div>
             </div>
+
+            <!-- Add template for evaluation card that will be used by JavaScript -->
+            <template id="evaluationCardTemplate">
+              <div class="evaluation-card fade-in">
+                <div class="card-content">
+                  <div
+                    class="d-flex justify-content-between align-items-center mb-2"
+                  >
+                    <h6 class="mb-0 quiz-id"></h6>
+                    <div class="d-flex align-items-center gap-2">
+                      <span class="badge bg-primary status-badge"></span>
+                      <button class="btn btn-sm btn-outline-danger stop-btn">
+                        <i class="bi bi-stop-circle"></i>
+                      </button>
+                    </div>
+                  </div>
+                  <div class="progress mb-2">
+                    <div
+                      class="progress-bar"
+                      role="progressbar"
+                      style="width: 0%"
+                      aria-valuenow="0"
+                      aria-valuemin="0"
+                      aria-valuemax="100"
+                    >
+                      0%
+                    </div>
+                  </div>
+                  <small class="text-muted d-block response-count"></small>
+                  <small class="text-muted d-block timing-info mt-1"></small>
+                  <small class="text-muted d-block rate-info mt-1"></small>
+                </div>
+              </div>
+            </template>
 
             <!-- Worker Status -->
             <div class="col-md-6 mb-4">
@@ -86,48 +141,136 @@
                   <h5 class="card-title mb-0">
                     <i class="bi bi-cpu"></i> Worker Status
                   </h5>
-                  <span class="badge bg-primary" id="workerCount"
-                    >0 Active</span
-                  >
+                  <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-primary" id="workerCount"
+                      >0 Active</span
+                    >
+                    <button
+                      class="btn btn-sm btn-primary"
+                      id="refreshWorkers"
+                      title="Refresh worker status"
+                      aria-label="Refresh worker status"
+                    >
+                      <i class="bi bi-arrow-clockwise" aria-hidden="true"></i>
+                    </button>
+                  </div>
                 </div>
                 <div class="card-body">
                   <div id="workerList" class="worker-list">
-                    <!-- Worker status items will be inserted here -->
+                    <!-- Worker items will be inserted here -->
                   </div>
                 </div>
               </div>
             </div>
+
+            <!-- Add template for worker item that will be used by JavaScript -->
+            <template id="workerItemTemplate">
+              <div class="worker-item">
+                <div class="d-flex justify-content-between align-items-start">
+                  <div>
+                    <h6 class="mb-1 worker-title"></h6>
+                    <small class="text-muted d-block worker-status"></small>
+                    <small class="text-muted d-block worker-resources"></small>
+                    <small class="text-muted d-block worker-uptime"></small>
+                    <small class="text-muted d-block worker-jobs"></small>
+                    <div
+                      class="mt-2 pt-2 border-top current-job-info"
+                      style="display: none"
+                    >
+                      <small class="text-muted d-block job-id"></small>
+                      <small class="text-muted d-block quiz-id"></small>
+                      <small class="text-muted d-block job-start"></small>
+                      <small class="text-muted d-block job-duration"></small>
+                    </div>
+                  </div>
+                  <button class="btn btn-icon">
+                    <i class="bi bi-x-circle"></i>
+                  </button>
+                </div>
+              </div>
+            </template>
           </div>
 
           <div class="row">
+            <!-- Queue Information Summary -->
+            <div class="col-md-12 mb-3">
+              <div class="row">
+                <div class="col-md-4">
+                  <div class="card text-center">
+                    <div class="card-body">
+                      <h3 class="card-title text-secondary" id="queuedCount">
+                        0
+                      </h3>
+                      <p class="card-text">Queued Jobs</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-4">
+                  <div class="card text-center">
+                    <div class="card-body">
+                      <h3 class="card-title text-danger" id="failedCount">0</h3>
+                      <p class="card-text">Failed Jobs</p>
+                    </div>
+                  </div>
+                </div>
+                <div class="col-md-4">
+                  <div class="card text-center">
+                    <div class="card-body">
+                      <h3 class="card-title text-success" id="completedCount">
+                        0
+                      </h3>
+                      <p class="card-text">Completed Jobs</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
             <!-- Queue Information -->
             <div class="col-md-12 mb-4">
               <div class="card fade-in">
                 <div class="card-header">
-                  <ul class="nav nav-tabs card-header-tabs" role="tablist">
-                    <li class="nav-item">
+                  <!-- Fix queue tabs -->
+                  <ul
+                    class="nav nav-tabs card-header-tabs"
+                    role="tablist"
+                    aria-label="Queue information tabs"
+                  >
+                    <li class="nav-item" role="presentation">
                       <a
                         class="nav-link active"
+                        id="queuedTab"
                         data-bs-toggle="tab"
                         href="#queuedJobs"
+                        role="tab"
+                        aria-controls="queuedJobs"
+                        aria-selected="true"
                       >
                         <i class="bi bi-hourglass-split"></i> Queued
                       </a>
                     </li>
-                    <li class="nav-item">
+                    <li class="nav-item" role="presentation">
                       <a
                         class="nav-link"
+                        id="failedTab"
                         data-bs-toggle="tab"
                         href="#failedJobs"
+                        role="tab"
+                        aria-controls="failedJobs"
+                        aria-selected="false"
                       >
                         <i class="bi bi-x-circle"></i> Failed
                       </a>
                     </li>
-                    <li class="nav-item">
+                    <li class="nav-item" role="presentation">
                       <a
                         class="nav-link"
+                        id="completedTab"
                         data-bs-toggle="tab"
                         href="#completedJobs"
+                        role="tab"
+                        aria-controls="completedJobs"
+                        aria-selected="false"
                       >
                         <i class="bi bi-check-circle"></i> Completed
                       </a>
@@ -208,6 +351,8 @@
                       <select
                         class="form-select llm-form-control"
                         id="provider"
+                        title="Select LLM Provider"
+                        aria-label="Select LLM Provider"
                       >
                         <option value="openai">OpenAI</option>
                         <option value="anthropic">Anthropic</option>
@@ -220,6 +365,9 @@
                         type="text"
                         class="form-control llm-form-control"
                         id="modelName"
+                        title="Model Name"
+                        aria-label="Model Name"
+                        placeholder="Enter model name"
                       />
                     </div>
                     <div class="llm-form-group">
@@ -228,6 +376,9 @@
                         type="password"
                         class="form-control llm-form-control"
                         id="apiKey"
+                        title="API Key"
+                        aria-label="API Key"
+                        placeholder="Enter API key"
                       />
                     </div>
                     <button type="submit" class="btn btn-primary">
@@ -247,25 +398,45 @@
                   </h5>
                 </div>
                 <div class="card-body">
-                  <div class="nav nav-pills mb-3" role="tablist">
+                  <!-- Fix LLM test tabs -->
+                  <div
+                    class="nav nav-pills mb-3"
+                    role="tablist"
+                    aria-label="LLM test options"
+                  >
                     <button
                       class="nav-link active"
+                      id="scoreTestTab"
                       data-bs-toggle="pill"
                       data-bs-target="#scoreTest"
+                      type="button"
+                      role="tab"
+                      aria-controls="scoreTest"
+                      aria-selected="true"
                     >
                       Score
                     </button>
                     <button
                       class="nav-link"
+                      id="guidelinesTestTab"
                       data-bs-toggle="pill"
                       data-bs-target="#guidelinesTest"
+                      type="button"
+                      role="tab"
+                      aria-controls="guidelinesTest"
+                      aria-selected="false"
                     >
                       Guidelines
                     </button>
                     <button
                       class="nav-link"
+                      id="enhanceTestTab"
                       data-bs-toggle="pill"
                       data-bs-target="#enhanceTest"
+                      type="button"
+                      role="tab"
+                      aria-controls="enhanceTest"
+                      aria-selected="false"
                     >
                       Enhance Q&A
                     </button>
@@ -281,6 +452,9 @@
                             class="form-control llm-form-control"
                             id="scoreQuestion"
                             rows="3"
+                            title="Question"
+                            aria-label="Question"
+                            placeholder="Enter question"
                           ></textarea>
                         </div>
                         <div class="llm-form-group">
@@ -289,6 +463,9 @@
                             class="form-control llm-form-control"
                             id="studentAnswer"
                             rows="3"
+                            title="Student Answer"
+                            aria-label="Student Answer"
+                            placeholder="Enter student answer"
                           ></textarea>
                         </div>
                         <div class="llm-form-group">
@@ -297,6 +474,9 @@
                             class="form-control llm-form-control"
                             id="expectedAnswer"
                             rows="3"
+                            title="Expected Answer"
+                            aria-label="Expected Answer"
+                            placeholder="Enter expected answer"
                           ></textarea>
                         </div>
                         <div class="llm-form-group">
@@ -305,6 +485,9 @@
                             type="number"
                             class="form-control llm-form-control"
                             id="totalScore"
+                            title="Total Score"
+                            aria-label="Total Score"
+                            placeholder="Enter total score"
                           />
                         </div>
                         <button type="submit" class="btn btn-primary">
@@ -322,6 +505,9 @@
                             class="form-control llm-form-control"
                             id="guidelinesQuestion"
                             rows="3"
+                            title="Question for Guidelines"
+                            aria-label="Question for Guidelines"
+                            placeholder="Enter question"
                           ></textarea>
                         </div>
                         <div class="llm-form-group">
@@ -330,6 +516,9 @@
                             class="form-control llm-form-control"
                             id="guidelinesExpectedAnswer"
                             rows="3"
+                            title="Expected Answer for Guidelines"
+                            aria-label="Expected Answer for Guidelines"
+                            placeholder="Enter expected answer"
                           ></textarea>
                         </div>
                         <button type="submit" class="btn btn-primary">
@@ -347,6 +536,9 @@
                             class="form-control llm-form-control"
                             id="enhanceQuestion"
                             rows="3"
+                            title="Question to Enhance"
+                            aria-label="Question to Enhance"
+                            placeholder="Enter question"
                           ></textarea>
                         </div>
                         <div class="llm-form-group">
@@ -355,6 +547,9 @@
                             class="form-control llm-form-control"
                             id="enhanceExpectedAnswer"
                             rows="3"
+                            title="Expected Answer to Enhance"
+                            aria-label="Expected Answer to Enhance"
+                            placeholder="Enter expected answer"
                           ></textarea>
                         </div>
                         <button type="submit" class="btn btn-primary">
@@ -378,10 +573,10 @@
                   </h5>
                 </div>
                 <div class="card-body">
+                  <!-- Fix test results pre tag styling -->
                   <pre
                     id="testResults"
-                    class="llm-form-control"
-                    style="max-height: 400px; overflow-y: auto"
+                    class="llm-form-control test-results-pre"
                   ></pre>
                 </div>
               </div>
@@ -407,7 +602,31 @@
           <div class="modal-body">
             <p>Select action for Worker <span id="workerPidDisplay"></span>:</p>
             <div class="mb-3">
-              <!-- Radio options will be dynamically inserted here -->
+              <div class="form-check">
+                <input
+                  class="form-check-input"
+                  type="radio"
+                  name="killOption"
+                  id="killGracefully"
+                  value="graceful"
+                  checked
+                />
+                <label class="form-check-label" for="killGracefully">
+                  Graceful Shutdown (Wait for current job to complete)
+                </label>
+              </div>
+              <div class="form-check">
+                <input
+                  class="form-check-input"
+                  type="radio"
+                  name="killOption"
+                  id="killImmediately"
+                  value="immediate"
+                />
+                <label class="form-check-label" for="killImmediately">
+                  Immediate Termination (Current job will be requeued)
+                </label>
+              </div>
             </div>
             <div class="mb-3">
               <div class="form-check">

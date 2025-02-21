@@ -58,6 +58,7 @@
         background-color: rgba(255, 255, 255, 0.1);
         border-color: rgba(255, 255, 255, 0.2);
         backdrop-filter: blur(8px);
+        -webkit-backdrop-filter: blur(8px);
     }
 
     .theme-switch:hover {
@@ -183,23 +184,78 @@ body {
     padding: 1rem;
     min-height: 350px;
     position: relative;
+    -webkit-overflow-scrolling: touch;
+    -webkit-scrollbar-width: thin;
 }
 
+/* Custom scrollbar styling with fallbacks */
+.worker-list, .evaluation-list {
+    overflow-y: auto;
+    
+    /* Standard scrollbar styling */
+    -webkit-scrollbar-width: thin;
+    scrollbar-width: thin;
+    
+    /* Scrollbar colors */
+    -webkit-scrollbar-color: var(--primary-color) var(--bg-secondary);
+    scrollbar-color: var(--primary-color) var(--bg-secondary);
+}
+
+/* Improved scrollbar styling for webkit browsers as fallback */
 .worker-list::-webkit-scrollbar,
-.evaluation-list::-webkit-scrollbar {
+.evaluation-list::-webkit-scrollbar,
+.test-results-pre::-webkit-scrollbar {
     width: 6px;
+    height: 6px;
 }
 
 .worker-list::-webkit-scrollbar-track,
-.evaluation-list::-webkit-scrollbar-track {
+.evaluation-list::-webkit-scrollbar-track,
+.test-results-pre::-webkit-scrollbar-track {
     background: var(--bg-secondary);
     border-radius: 3px;
 }
 
 .worker-list::-webkit-scrollbar-thumb,
-.evaluation-list::-webkit-scrollbar-thumb {
+.evaluation-list::-webkit-scrollbar-thumb,
+.test-results-pre::-webkit-scrollbar-thumb {
     background: var(--primary-color);
     border-radius: 3px;
+}
+
+/* Add fallback for browsers that don't support custom properties */
+@supports not (color: var(--primary-color)) {
+    .worker-list::-webkit-scrollbar-thumb,
+    .evaluation-list::-webkit-scrollbar-thumb,
+    .test-results-pre::-webkit-scrollbar-thumb {
+        background: #4361ee;
+    }
+    
+    .worker-list::-webkit-scrollbar-track,
+    .evaluation-list::-webkit-scrollbar-track,
+    .test-results-pre::-webkit-scrollbar-track {
+        background: #f3f4f6;
+    }
+}
+
+/* Mobile touch scrolling fallback */
+@supports (-webkit-overflow-scrolling: touch) {
+    .worker-list,
+    .evaluation-list,
+    .test-results-pre {
+        overflow-y: scroll;
+        -webkit-overflow-scrolling: touch;
+    }
+}
+
+/* Fallback for browsers without custom scrollbars */
+@supports not (scrollbar-width: thin) {
+    .worker-list,
+    .evaluation-list,
+    .test-results-pre {
+        overflow-y: auto;
+        scrollbar-width: auto;
+    }
 }
 
 .worker-item, .evaluation-card {
@@ -303,6 +359,8 @@ body {
     border-radius: 1rem;
     font-weight: 500;
     font-size: 0.875rem;
+    min-width: 80px;
+    text-align: center;
 }
 
 /* LLM Testing Panel Styles */
@@ -491,11 +549,13 @@ body *,
     left: 50%;
     transform: translate(-50%, -50%);
     width: 100%;
+    padding: 2rem;
 }
 
 .empty-state-icon {
-    font-size: 3rem;
+    font-size: 2.5rem;
     margin-bottom: 1rem;
+    opacity: 0.8;
 }
 
 .h-100 {
@@ -538,6 +598,8 @@ body *,
 
 .text-danger {
     color: var(--danger-color) !important;
+    word-break: break-word;
+    max-width: 400px;
 }
 
 /* Modal radio and checkbox improvements */
@@ -624,4 +686,64 @@ body, .card, .navbar, .modal-content, .form-control, .btn {
                 box-shadow 0.2s ease,
                 background-color 0.3s ease,
                 border-color 0.3s ease;
+}
+
+/* Queue Info Styling */
+.queue-summary-card {
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.queue-summary-card:hover {
+    transform: translateY(-2px);
+}
+
+/* Job Status Badges */
+.badge.bg-secondary {
+    background-color: var(--secondary-color) !important;
+}
+
+/* Worker Status Improvements */
+.worker-item .btn-icon {
+    opacity: 0.8;
+    transition: opacity 0.2s ease;
+}
+
+.worker-item:hover .btn-icon {
+    opacity: 1;
+}
+
+.worker-item .current-job-info {
+    background-color: var(--bg-secondary);
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+    margin-top: 1rem;
+}
+
+.worker-item.evaluating .current-job-info {
+    border-left: 3px solid var(--primary-color);
+}
+
+/* Table Improvements */
+.table td {
+    vertical-align: middle;
+}
+
+.table tr {
+    transition: background-color 0.2s ease;
+}
+
+/* Add missing style for test results pre tag */
+.test-results-pre {
+    max-height: 400px;
+    overflow-y: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+    margin: 0;
+    padding: 1rem;
+    background-color: var(--bg-secondary);
+    border-radius: 0.5rem;
+    border: 1px solid var(--border-color);
 }

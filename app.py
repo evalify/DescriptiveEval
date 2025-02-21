@@ -351,6 +351,17 @@ def get_micro_llm_dependency():
         api_key=app.state.current_micro_llm_api_key,
     )
 
+@app.get("/get-provider")
+async def get_provider():
+    return {
+        "provider": app.state.current_provider.value,
+        "model_name": app.state.current_model_name,
+        "api_key": app.state.current_api_key,
+        "micro_provider": app.state.current_micro_llm_provider.value,
+        "micro_model_name": app.state.current_micro_llm_model_name,
+        "micro_api_key": app.state.current_micro_llm_api_key,
+        "available_providers": [provider.value for provider in LLMProvider],
+    }
 
 @app.post("/set-provider")
 async def change_provider(request: ProviderRequest):

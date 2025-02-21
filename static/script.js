@@ -76,20 +76,22 @@ async function updateActiveEvaluations() {
   try {
     const workersResponse = await fetch("/workers/status");
     const workersData = await workersResponse.json();
-    const activeQuizIds = workersData.queue_info.queued
-      .map((job) => job.quiz_id)
-      .filter((id) => id !== null);
 
     const container = document.getElementById("activeEvaluations");
     const emptyState = document.getElementById("emptyEvaluationState");
 
-    if (activeQuizIds.length === 0) {
+    // Check if there are any active evaluations by looking at workers with current_jobs
+    const activeWorkers = workersData.workers.filter(
+      (worker) => worker.current_job !== null
+    );
+
+    if (activeWorkers.length === 0) {
       if (!emptyState) {
         container.innerHTML = `
-                    <div id="emptyEvaluationState" class="empty-state text-center">
-                        <div class="empty-state-icon mb-3">🌬️</div>
-                        <h5>No Quizzes are being evaluated</h5>
-                    </div>`;
+          <div id="emptyEvaluationState" class="empty-state text-center">
+            <div class="empty-state-icon mb-3">🌬️</div>
+            <h5>No Quizzes are being evaluated</h5>
+          </div>`;
       }
       return;
     }
@@ -99,73 +101,111 @@ async function updateActiveEvaluations() {
       emptyState.remove();
     }
 
-    // Fetch and update evaluations
-    const evaluationPromises = activeQuizIds.map((quizId) =>
-      fetch(`/evaluate/status/${quizId}`).then((r) => r.json())
-    );
-
-    const evaluations = await Promise.all(evaluationPromises);
-
     // Create a document fragment for better performance
     const fragment = document.createDocumentFragment();
 
-    evaluations.forEach((eval) => {
-      const progress = Math.round(
-        (eval.evaluated_responses / eval.total_responses) * 100
-      );
-      const existingCard = container.querySelector(
-        `[data-quiz-id="${eval.quiz_id}"]`
-      );
+    // Get status for each active worker's quiz
+    for (const worker of activeWorkers) {
+      const quizId = worker.current_job.quiz_id;
+      try {
+        const statusResponse = await fetch(`/evaluate/status/${quizId}`);
+        const statusData = await statusResponse.json();
 
-      if (existingCard) {
-        // Update existing card
-        const progressBar = existingCard.querySelector(".progress-bar");
-        progressBar.style.width = `${progress}%`;
-        progressBar.setAttribute("aria-valuenow", progress);
-        progressBar.textContent = `${progress}%`;
+        if (statusData.message === "No Evaluation is Running") {
+          continue;
+        }
 
-        existingCard.querySelector(".status-badge").className = `badge bg-${
-          eval.status === "evaluating" ? "primary" : "success"
-        } status-badge`;
-        existingCard.querySelector(".status-badge").textContent = eval.status;
+        const progress = statusData.progress || 0;
+        const existingCard = container.querySelector(
+          `[data-quiz-id="${quizId}"]`
+        );
 
-        existingCard.querySelector(
-          ".response-count"
-        ).textContent = `${eval.evaluated_responses} / ${eval.total_responses} responses evaluated`;
-      } else {
-        // Create new card
-        const card = document.createElement("div");
-        card.className = "evaluation-card fade-in";
-        card.dataset.quizId = eval.quiz_id;
-        card.innerHTML = `
-                    <div class="d-flex justify-content-between align-items-center mb-2">
-                        <h6 class="mb-0">Quiz ID: ${eval.quiz_id}</h6>
-                        <span class="badge bg-${
-                          eval.status === "evaluating" ? "primary" : "success"
-                        } status-badge">
-                            ${eval.status}
-                        </span>
-                    </div>
-                    <div class="progress mb-2">
-                        <div class="progress-bar" role="progressbar" style="width: ${progress}%" 
-                             aria-valuenow="${progress}" aria-valuemin="0" aria-valuemax="100">
-                            ${progress}%
-                        </div>
-                    </div>
-                    <small class="text-muted response-count">
-                        ${eval.evaluated_responses} / ${
-          eval.total_responses
-        } responses evaluated
-                    </small>
-                `;
-        fragment.appendChild(card);
+        if (existingCard) {
+          // Update existing card
+          const progressBar = existingCard.querySelector(".progress-bar");
+          progressBar.style.width = `${progress}%`;
+          progressBar.setAttribute("aria-valuenow", progress);
+          progressBar.textContent = `${progress}%`;
+
+          existingCard.querySelector(".status-badge").className =
+            "badge bg-primary status-badge";
+          existingCard.querySelector(".status-badge").textContent =
+            statusData.current_phase || "evaluating";
+
+          existingCard.querySelector(
+            ".response-count"
+          ).textContent = `${Math.round(
+            statusData.total * (statusData.progress / 100)
+          )} / ${statusData.total} responses evaluated`;
+
+          // Update timing info if available
+          if (statusData.elapsed) {
+            const timingInfo =
+              existingCard.querySelector(".timing-info") ||
+              document.createElement("small");
+            timingInfo.className = "text-muted d-block timing-info mt-1";
+            timingInfo.textContent = `Elapsed: ${formatDuration(
+              statusData.elapsed
+            )} | Remaining: ${formatDuration(statusData.remaining)}`;
+            if (!existingCard.querySelector(".timing-info")) {
+              existingCard
+                .querySelector(".card-content")
+                .appendChild(timingInfo);
+            }
+          }
+        } else {
+          // Create new card
+          const card = document.createElement("div");
+          card.className = "evaluation-card fade-in";
+          card.dataset.quizId = quizId;
+          card.innerHTML = `
+            <div class="card-content">
+              <div class="d-flex justify-content-between align-items-center mb-2">
+                <h6 class="mb-0">Quiz ID: ${quizId}</h6>
+                <span class="badge bg-primary status-badge">
+                  ${statusData.current_phase || "evaluating"}
+                </span>
+              </div>
+              <div class="progress mb-2">
+                <div class="progress-bar" role="progressbar" style="width: ${progress}%" 
+                     aria-valuenow="${progress}" aria-valuemin="0" aria-valuemax="100">
+                  ${progress}%
+                </div>
+              </div>
+              <small class="text-muted d-block response-count">
+                ${Math.round(
+                  statusData.total * (statusData.progress / 100)
+                )} / ${statusData.total} responses evaluated
+              </small>
+              ${
+                statusData.elapsed
+                  ? `
+                <small class="text-muted d-block timing-info mt-1">
+                  Elapsed: ${formatDuration(
+                    statusData.elapsed
+                  )} | Remaining: ${formatDuration(statusData.remaining)}
+                </small>
+              `
+                  : ""
+              }
+            </div>
+          `;
+          fragment.appendChild(card);
+        }
+      } catch (error) {
+        console.error(`Error fetching status for quiz ${quizId}:`, error);
       }
-    });
+    }
 
     // Remove cards for completed evaluations
     Array.from(container.children).forEach((card) => {
       const quizId = card.dataset.quizId;
-      if (!evaluations.some((eval) => eval.quiz_id === quizId)) {
+      if (
+        !activeWorkers.some(
+          (worker) =>
+            worker.current_job && worker.current_job.quiz_id === quizId
+        )
+      ) {
         card.classList.add("fade-out");
         setTimeout(() => card.remove(), 300);
       }
@@ -185,15 +225,19 @@ async function updateWorkerStatus() {
     const response = await fetch("/workers/status");
     const data = await response.json();
 
-    const workerList = document.getElementById("workerList");
-    workerList.innerHTML = "";
-
+    // Update worker count
     document.getElementById(
       "workerCount"
     ).textContent = `${data.active_workers} Active`;
 
+    // Update worker list
     updateWorkerList(data.workers);
+
+    // Update queue info
     updateQueueInfo(data.queue_info);
+
+    // Update summary stats
+    updateDashboardStats(data.jobs_summary);
   } catch (error) {
     console.error("Error updating worker status:", error);
     showToast("Failed to update worker status", "danger");
@@ -202,89 +246,83 @@ async function updateWorkerStatus() {
 
 // Update queue information
 function updateQueueInfo(queueInfo) {
-  updateQueueTable("queuedJobsList", queueInfo.queued, renderQueuedRow);
-  updateQueueTable("failedJobsList", queueInfo.failed, renderFailedRow);
-  updateQueueTable(
-    "completedJobsList",
-    queueInfo.completed,
-    renderCompletedRow
-  );
+  // Update tabs with counts
+  document.querySelector(
+    '[href="#queuedJobs"]'
+  ).innerHTML = `<i class="bi bi-hourglass-split"></i> Queued (${queueInfo.queued.length})`;
+  document.querySelector(
+    '[href="#failedJobs"]'
+  ).innerHTML = `<i class="bi bi-x-circle"></i> Failed (${queueInfo.failed.length})`;
+  document.querySelector(
+    '[href="#completedJobs"]'
+  ).innerHTML = `<i class="bi bi-check-circle"></i> Completed (${queueInfo.completed.length})`;
+
+  // Update tables
+  updateQueuedJobs(queueInfo.queued);
+  updateFailedJobs(queueInfo.failed);
+  updateCompletedJobs(queueInfo.completed);
 }
 
-function updateQueueTable(tableId, data, renderRow) {
-  const tbody = document.getElementById(tableId);
-  const currentRows = new Set(
-    Array.from(tbody.children).map((row) => row.dataset.jobId)
-  );
-  const newRows = new Set(data.map((job) => job.job_id));
-
-  // Remove rows that no longer exist
-  Array.from(tbody.children).forEach((row) => {
-    if (!newRows.has(row.dataset.jobId)) {
-      row.classList.add("fade-out");
-      setTimeout(() => row.remove(), 300);
-    }
-  });
-
-  // Update existing rows and add new ones
-  data.forEach((job) => {
-    const existingRow = tbody.querySelector(`[data-job-id="${job.job_id}"]`);
-    const rowHtml = renderRow(job);
-
-    if (existingRow) {
-      // Only update if content has changed
-      if (existingRow.innerHTML !== rowHtml) {
-        existingRow.innerHTML = rowHtml;
-      }
-    } else {
-      const tr = document.createElement("tr");
-      tr.dataset.jobId = job.job_id;
-      tr.className = "fade-in";
-      tr.innerHTML = rowHtml;
-      tbody.appendChild(tr);
-    }
-  });
+function updateQueuedJobs(jobs) {
+  const tbody = document.getElementById("queuedJobsList");
+  tbody.innerHTML = jobs
+    .map(
+      (job) => `
+    <tr data-job-id="${job.job_id}" class="fade-in">
+      <td>${job.job_id}</td>
+      <td>${job.quiz_id}</td>
+      <td>${
+        job.enqueued_at ? new Date(job.enqueued_at).toLocaleString() : "N/A"
+      }</td>
+      <td><span class="badge bg-secondary">queued</span></td>
+      <td>${job.worker_pid || "N/A"}</td>
+      <td>
+        <button class="btn btn-warning btn-sm" onclick="stopJob('${
+          job.quiz_id
+        }')">
+          <i class="bi bi-stop-circle"></i> Stop
+        </button>
+      </td>
+    </tr>
+  `
+    )
+    .join("");
 }
 
-function renderQueuedRow(job) {
-  return `
-        <td>${job.job_id}</td>
-        <td>${job.quiz_id}</td>
-        <td>${new Date(job.enqueued_at).toLocaleString()}</td>
-        <td><span class="badge bg-${
-          job.status === "queued" ? "secondary" : "primary"
-        }">${job.status}</span></td>
-        <td>${job.worker_pid || "N/A"}</td>
-        <td>
-            <button class="btn btn-warning btn-sm" onclick="stopJob('${
-              job.quiz_id
-            }')">
-                Stop
-            </button>
-        </td>
-    `;
+function updateFailedJobs(jobs) {
+  const tbody = document.getElementById("failedJobsList");
+  tbody.innerHTML = jobs
+    .map(
+      (job) => `
+    <tr data-job-id="${job.job_id}" class="fade-in">
+      <td>${job.job_id}</td>
+      <td>${job.quiz_id}</td>
+      <td>${
+        job.failed_at ? new Date(job.failed_at).toLocaleString() : "N/A"
+      }</td>
+      <td class="text-danger">${job.error_message || "Unknown error"}</td>
+    </tr>
+  `
+    )
+    .join("");
 }
 
-function renderFailedRow(job) {
-  return `
-        <td>${job.job_id}</td>
-        <td>${job.quiz_id}</td>
-        <td>${
-          job.failed_at ? new Date(job.failed_at).toLocaleString() : "N/A"
-        }</td>
-        <td>${job.error_message}</td>
-    `;
-}
-
-function renderCompletedRow(job) {
-  return `
-        <td>${job.job_id}</td>
-        <td>${job.quiz_id}</td>
-        <td>${
-          job.completed_at ? new Date(job.completed_at).toLocaleString() : "N/A"
-        }</td>
-        <td>${formatDuration(job.duration)}</td>
-    `;
+function updateCompletedJobs(jobs) {
+  const tbody = document.getElementById("completedJobsList");
+  tbody.innerHTML = jobs
+    .map(
+      (job) => `
+    <tr data-job-id="${job.job_id}" class="fade-in">
+      <td>${job.job_id}</td>
+      <td>${job.quiz_id}</td>
+      <td>${
+        job.completed_at ? new Date(job.completed_at).toLocaleString() : "N/A"
+      }</td>
+      <td>${formatDuration(job.duration || 0)}</td>
+    </tr>
+  `
+    )
+    .join("");
 }
 
 // Kill worker function
@@ -439,9 +477,81 @@ const killWorkerModal = new bootstrap.Modal(
   document.getElementById("killWorkerModal")
 );
 
+function generateWorkerContent(worker, isEvaluating, statusText) {
+  const cpuPercent = worker.current.cpu_percent.toFixed(1);
+  const memoryPercent = worker.current.memory_percent.toFixed(1);
+  const uptime = formatDuration(worker.stats.uptime_seconds);
+
+  let jobInfo = "";
+  if (worker.current_job) {
+    const jobStartTime = worker.current_job.started_at
+      ? new Date(worker.current_job.started_at).toLocaleString()
+      : "N/A";
+    const jobDuration = worker.current_job.duration
+      ? formatDuration(worker.current_job.duration)
+      : "N/A";
+    jobInfo = `
+      <div class="mt-2 pt-2 border-top">
+        <small class="text-muted d-block">Job ID: ${
+          worker.current_job.job_id || "N/A"
+        }</small>
+        <small class="text-muted d-block">Quiz ID: ${
+          worker.current_job.quiz_id || "N/A"
+        }</small>
+        ${
+          jobStartTime !== "N/A"
+            ? `<small class="text-muted d-block">Started: ${jobStartTime}</small>`
+            : ""
+        }
+        ${
+          jobDuration !== "N/A"
+            ? `<small class="text-muted d-block">Running for: ${jobDuration}</small>`
+            : ""
+        }
+      </div>
+    `;
+  }
+
+  return `
+    <div class="d-flex justify-content-between align-items-start">
+      <div>
+        <h6 class="mb-1">Worker #${worker.worker_id} (PID: ${worker.pid})</h6>
+        <small class="text-muted d-block">Status: ${worker.status}</small>
+        <small class="text-muted d-block">CPU: ${cpuPercent}% | Memory: ${memoryPercent}%</small>
+        <small class="text-muted d-block">Uptime: ${uptime}</small>
+        <small class="text-muted d-block">Jobs Completed: ${
+          worker.stats.jobs_completed
+        }</small>
+        ${jobInfo}
+      </div>
+      <button class="btn ${
+        worker.current_job ? "btn-warning" : "btn-danger"
+      } btn-icon" 
+              onclick="showKillWorkerModal(${worker.pid}, ${Boolean(
+    worker.current_job
+  )})">
+        <i class="bi bi-x-circle"></i>
+      </button>
+    </div>
+  `;
+}
+
 function updateWorkerList(workers) {
   const workerList = document.getElementById("workerList");
   const fragment = document.createDocumentFragment();
+
+  if (workers.length === 0) {
+    const emptyState = document.createElement("div");
+    emptyState.className = "empty-state text-center";
+    emptyState.innerHTML = `
+      <div class="empty-state-icon mb-3">🤖</div>
+      <h5>No Active Workers</h5>
+    `;
+    fragment.appendChild(emptyState);
+    workerList.innerHTML = "";
+    workerList.appendChild(fragment);
+    return;
+  }
 
   workers.forEach((worker) => {
     const isEvaluating = worker.current_job !== null;
@@ -450,11 +560,6 @@ function updateWorkerList(workers) {
       : worker.status === "running"
       ? "idle"
       : "stopped";
-    const statusText = isEvaluating
-      ? "Evaluating"
-      : worker.status === "running"
-      ? "Idle"
-      : "Stopped";
 
     const existingWorker = workerList.querySelector(
       `[data-pid="${worker.pid}"]`
@@ -462,17 +567,15 @@ function updateWorkerList(workers) {
     const workerContent = generateWorkerContent(
       worker,
       isEvaluating,
-      statusText
+      worker.status
     );
 
     if (existingWorker) {
-      // Update existing worker element if status or job info changed
       if (existingWorker.innerHTML !== workerContent) {
         existingWorker.innerHTML = workerContent;
         existingWorker.className = `worker-item ${statusClass}`;
       }
     } else {
-      // Create new worker element
       const workerElement = document.createElement("div");
       workerElement.className = `worker-item ${statusClass} fade-in`;
       workerElement.dataset.pid = worker.pid;
@@ -493,115 +596,14 @@ function updateWorkerList(workers) {
   workerList.appendChild(fragment);
 }
 
-function generateWorkerContent(worker, isEvaluating, statusText) {
-  const cpuPercent = worker.current.cpu_percent.toFixed(1);
-  const memoryPercent = worker.current.memory_percent.toFixed(1);
-  const uptime = formatDuration(worker.stats.uptime_seconds);
-
-  let jobInfo = "";
-  if (isEvaluating) {
-    const duration = formatDuration(worker.current_job.duration);
-    const startTime = new Date(worker.current_job.started_at).toLocaleString();
-    jobInfo = `
-            <div class="mt-2 pt-2 border-top">
-                <small class="text-muted d-block">Quiz ID: ${worker.current_job.quiz_id}</small>
-                <small class="text-muted d-block">Started: ${startTime}</small>
-                <small class="text-muted d-block">Running for: ${duration}</small>
-            </div>
-        `;
-  }
-
-  return `
-        <div class="d-flex justify-content-between align-items-start">
-            <div>
-                <h6 class="mb-1">Worker PID: ${worker.pid}</h6>
-                <small class="text-muted d-block">Status: ${statusText}</small>
-                <small class="text-muted d-block">CPU: ${cpuPercent}% | Memory: ${memoryPercent}%</small>
-                <small class="text-muted d-block">Uptime: ${uptime}</small>
-                ${jobInfo}
-            </div>
-            <button class="btn ${
-              isEvaluating ? "btn-warning" : "btn-danger"
-            } btn-icon" 
-                    onclick="showKillWorkerModal(${
-                      worker.pid
-                    }, ${isEvaluating})">
-                <i class="bi bi-x-circle"></i>
-            </button>
-        </div>
-    `;
-}
-
-function showKillWorkerModal(pid, hasActiveJob) {
-  currentWorkerPid = pid;
-  document.getElementById("workerPidDisplay").textContent = pid;
-
-  // Update radio options
-  const radioContainer = document.querySelector(".modal-body .mb-3");
-  radioContainer.innerHTML = `
-        ${
-          hasActiveJob
-            ? `
-            <div class="form-check mb-3">
-                <input class="form-check-input" type="radio" name="killOption" id="killJobOnly" value="job" checked>
-                <label class="form-check-label" for="killJobOnly">
-                    <span class="text-warning">Stop Current Job Only</span>
-                    <small class="d-block text-muted mt-1">This will only stop the current evaluation job and free the worker for other tasks.</small>
-                </label>
-            </div>
-        `
-            : ""
-        }
-        <div class="form-check">
-            <input class="form-check-input" type="radio" name="killOption" id="killWorker" value="worker" ${
-              !hasActiveJob ? "checked" : ""
-            }>
-            <label class="form-check-label" for="killWorker">
-                <span class="text-danger">Terminate Worker Process</span>
-                <small class="d-block text-muted mt-1">⚠️ This will forcefully kill the worker process and any job it's running. This action cannot be undone.</small>
-            </label>
-        </div>
-    `;
-
-  // Get spawn replacement checkbox
-  const spawnReplacementCheck = document.getElementById("spawnReplacement");
-  const spawnReplacementContainer =
-    spawnReplacementCheck.closest(".form-check");
-
-  // Add radio change handler
-  const radioButtons = document.querySelectorAll('input[name="killOption"]');
-  radioButtons.forEach((radio) => {
-    radio.addEventListener("change", function () {
-      const isWorkerKill = this.value === "worker";
-      spawnReplacementCheck.disabled = !isWorkerKill;
-      spawnReplacementContainer.classList.toggle("disabled", !isWorkerKill);
-      if (!isWorkerKill) {
-        spawnReplacementCheck.checked = false;
-      }
-    });
-  });
-
-  // Initial state
-  const initialRadio = document.querySelector(
-    'input[name="killOption"]:checked'
-  );
-  spawnReplacementCheck.disabled = initialRadio.value !== "worker";
-  spawnReplacementContainer.classList.toggle(
-    "disabled",
-    initialRadio.value !== "worker"
-  );
-  if (initialRadio.value !== "worker") {
-    spawnReplacementCheck.checked = false;
-  }
-
-  // Update modal title and button based on action
-  document.querySelector("#killWorkerModal .modal-title").textContent =
-    hasActiveJob ? "Worker Action Required" : "Confirm Worker Termination";
-  document.getElementById("confirmKillWorker").textContent = hasActiveJob
-    ? "Proceed"
-    : "Terminate Worker";
-
-  killWorkerModal.show();
+// Update dashboard stats from jobs summary
+function updateDashboardStats(jobsSummary) {
+  document.getElementById("queuedCount").textContent = jobsSummary.queued;
+  document.getElementById("failedCount").textContent = jobsSummary.failed;
+  document.getElementById("completedCount").textContent = jobsSummary.completed;
+  document.getElementById("activeEvalCount").textContent = `${
+    jobsSummary.active || 0
+  } Active`;
 }
 
 // Initialize the dashboard
@@ -612,6 +614,12 @@ function initDashboard() {
   // Update current time every second
   setInterval(updateCurrentTime, 1000);
   updateCurrentTime();
+
+  // Add refresh button handler
+  document.getElementById("refreshWorkers").addEventListener("click", () => {
+    updateWorkerStatus();
+    updateActiveEvaluations();
+  });
 
   // Initial updates
   updateActiveEvaluations();
@@ -640,7 +648,68 @@ function initDashboard() {
   // Add kill worker modal confirmation handler
   document
     .getElementById("confirmKillWorker")
-    .addEventListener("click", handleWorkerKill);
+    .addEventListener("click", async () => {
+      const killOption = document.querySelector(
+        'input[name="killOption"]:checked'
+      ).value;
+      const spawnReplacement =
+        document.getElementById("spawnReplacement").checked;
+
+      try {
+        const response = await fetch(`/workers/kill/${currentWorkerPid}`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            mode: killOption,
+            spawn_replacement: spawnReplacement,
+          }),
+        });
+
+        if (!response.ok) throw new Error("Failed to kill worker");
+
+        const result = await response.json();
+        showToast(
+          `Worker ${currentWorkerPid} ${
+            killOption === "graceful"
+              ? "gracefully shutting down"
+              : "terminated"
+          } successfully`,
+          "success"
+        );
+
+        if (result.replacement_worker) {
+          showToast(
+            `New worker spawned with PID: ${result.replacement_worker.pid}`,
+            "info"
+          );
+        }
+
+        killWorkerModal.hide();
+        updateWorkerStatus();
+      } catch (error) {
+        console.error("Error killing worker:", error);
+        showToast(`Failed to kill worker ${currentWorkerPid}`, "danger");
+      }
+    });
+}
+
+function showKillWorkerModal(pid, hasActiveJob) {
+  currentWorkerPid = pid;
+  document.getElementById("workerPidDisplay").textContent = pid;
+
+  // Enable/disable and set default options based on job status
+  const immediateOption = document.getElementById("killImmediately");
+  const gracefulOption = document.getElementById("killGracefully");
+
+  if (hasActiveJob) {
+    immediateOption.disabled = false;
+    gracefulOption.checked = true;
+  } else {
+    immediateOption.disabled = false;
+    immediateOption.checked = true;
+  }
+
+  killWorkerModal.show();
 }
 
 // Start the dashboard when the page loads

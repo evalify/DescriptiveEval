@@ -246,6 +246,7 @@ async def bulk_evaluate_quiz_responses(
                                     quiz_result, types_to_evaluate
                                 )
                             )
+                            update_progress(redis_client, quiz_id, progress_bar, qlogger, "evaluation_in_progress")
                             heartbeat_interval = 10  # seconds between heartbeat logs
                             while not task.done():
                                 await asyncio.sleep(heartbeat_interval)
@@ -292,7 +293,7 @@ async def bulk_evaluate_quiz_responses(
                 # Update progress atomically
                 with threading.Lock():
                     progress_bar.update(1)
-                    update_progress(redis_client, quiz_id, progress_bar, qlogger, "complete")
+                    update_progress(redis_client, quiz_id, progress_bar, qlogger, "evaluation_in_progress")
 
                 return {
                     "result": evaluated_result,

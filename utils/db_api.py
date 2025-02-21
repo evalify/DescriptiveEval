@@ -87,10 +87,12 @@ async def get_guidelines(
     return guidelines
 
 
-def get_quiz_responses(cursor, redis_client: Redis, quiz_id: str, save_to_file=True, override_cache=False):
+def get_quiz_responses(
+    cursor, redis_client: Redis, quiz_id: str, save_to_file=True, override_cache=False
+):
     """
       Get all responses for a quiz based on the quiz ID from the Cockroach database.
-      
+
       QuizResult Schema:
       [{
 
@@ -195,7 +197,7 @@ async def set_quiz_response(cursor, conn, response: dict):
             logger.info(f"Successfully updated response {response['id']}")
             return
 
-        except (asyncio.TimeoutError, QueryCanceledError) as e:
+        except (asyncio.TimeoutError, QueryCanceledError):
             retries += 1
             logger.warning(
                 f"Operation timed out/cancelled for response {response['id']} (attempt {retries}/{max_retries})"
@@ -222,7 +224,9 @@ async def set_quiz_response(cursor, conn, response: dict):
                 pass
 
 
-def get_all_questions(mongo_db, redis_client: Redis, quiz_id: str, save_to_file=True, override_cache=False):
+def get_all_questions(
+    mongo_db, redis_client: Redis, quiz_id: str, save_to_file=True, override_cache=False
+):
     """
     Get all questions for a quiz from MongoDB
     :param mongo_db: The MongoDB database object i.e, client[db]
