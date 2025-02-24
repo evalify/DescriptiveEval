@@ -3,6 +3,14 @@ import sys
 from datetime import datetime
 from pathlib import Path
 
+sys.path.append(str(Path(__file__).parent.parent))
+
+import pytest
+from httpx import AsyncClient
+import subprocess
+from model import get_llm, LLMProvider
+from .fixtures import mock_questions, mock_responses, mock_evaluation_settings
+
 # Create logs directory if it doesn't exist
 log_dir = Path(__file__).parent.parent / "logs"
 log_dir.mkdir(exist_ok=True)
@@ -11,25 +19,50 @@ log_dir.mkdir(exist_ok=True)
 def pytest_configure(config):
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s',
+        format="%(asctime)s - %(levelname)s - %(message)s",
         handlers=[
-            logging.FileHandler(log_dir / f"eval_{datetime.now().strftime('%Y%m%d')}.log"),
-            logging.StreamHandler(sys.stdout)
-        ]
+            logging.FileHandler(
+                log_dir / f"eval_{datetime.now().strftime('%Y%m%d')}.log"
+            ),
+            logging.StreamHandler(sys.stdout),
+        ],
     )
 
 
-sys.path.append(str(Path(__file__).parent.parent))
+@pytest.fixture(scope="session")
+def llm():
+    """Provide a configured LLM instance for tests"""
+    return get_llm(
+        provider=LLMProvider.GROQ,
+        model_name="llama-3.3-70b-specdec",  # Default model
+        api_key=None,  # Will use environment variable
+    )
 
-import pytest
-from httpx import AsyncClient
-import subprocess
+
+@pytest.fixture
+def mock_quiz_questions():
+    """Provide mock quiz questions for testing"""
+    return mock_questions
+
+
+@pytest.fixture
+def mock_quiz_responses():
+    """Provide mock quiz responses for testing"""
+    return mock_responses
+
+
+@pytest.fixture
+def mock_quiz_settings():
+    """Provide mock evaluation settings for testing"""
+    return mock_evaluation_settings
 
 
 @pytest.fixture(scope="session", autouse=True)
 def start_server():
     # Start the FastAPI server
-    process = subprocess.Popen(["python","-m","uvicorn", "app:app", "--host", "0.0.0.0", "--port", "4040"])
+    process = subprocess.Popen(
+        ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "4040"]
+    )
     import requests
     import time
 
@@ -62,5 +95,5 @@ def sample_answer():
         "guidelines": "Focus on: 1) Basic concept 2) Energy conversion 3) Raw materials needed",
         "student_ans": "Photosynthesis is the process where plants convert sunlight into energy.",
         "expected_ans": "Photosynthesis is the process by which plants convert light energy into chemical energy to produce glucose using carbon dioxide and water.",
-        "total_score": 10
+        "total_score": 10,
     }

@@ -540,13 +540,19 @@ def update_progress(redis_client: Redis, quiz_id: str, progress_bar: tqdm, logge
         progress_percent = (progress / total) * 100 if total > 0 else 0
         current_time = datetime.now()
         
+        elapsed = progress_bar.format_dict.get("elapsed", 0)
+        rate = progress_bar.format_dict.get("rate", 0)
+        
+        # Get remaining time
+        remaining_time = (total - progress) / rate if rate and total else 0
+
         progress_data = {
             "progress": round(progress_percent, 2),
             "total": total,
             "current": progress,
-            "elapsed": progress_bar.format_dict.get("elapsed", 0),
-            "remaining": progress_bar.format_dict.get("remaining", 0),
-            "rate": progress_bar.format_dict.get("rate", 0),
+            "elapsed": elapsed,
+            "rate": rate,
+            "remaining": remaining_time,
             "last_update": current_time.isoformat(),
             "current_phase": phase
         }
