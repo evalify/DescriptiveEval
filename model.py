@@ -297,13 +297,14 @@ async def generate_guidelines(
         }
 
 
-async def enhance_question_and_answer(llm, question: str, expected_ans: str) -> dict:
+async def enhance_question_and_answer(llm, question: str, expected_ans: str, errors : list = []) -> dict:
     """
     Enhance the question and expected answer to be clear, concise, and direct.
 
     :param llm: The LLM instance to use for enhancing the content
     :param question: The question to enhance
     :param expected_ans: The expected answer to enhance
+    :param errors: Any errors encountered during enhancement (optional)
     """
     if not question or not expected_ans:
         logger.error("Provide a question and expected answer to enhance the content")
@@ -327,12 +328,12 @@ async def enhance_question_and_answer(llm, question: str, expected_ans: str) -> 
     format_instructions = enhanced_content_parser.get_format_instructions()
 
     prompt_template = PromptTemplate(
-        input_variables=["question", "expected_ans"],
+        input_variables=["question", "expected_ans", "errors"],
         partial_variables={"format_instructions": format_instructions},
         template=qa_enhancement_template,
     )
 
-    _input = prompt_template.format(question=question, expected_ans=expected_ans)
+    _input = prompt_template.format(question=question, expected_ans=expected_ans, errors=errors)
 
     try:
         response = await llm.ainvoke(_input)
