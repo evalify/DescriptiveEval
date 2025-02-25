@@ -224,12 +224,16 @@ async def bulk_evaluate_quiz_responses(
                 if invalid_questions:
                     raise ResponseQuestionMismatchError(quiz_id, invalid_questions)
                 # phase_times["validation"] = time.monotonic() - validation_start
-                update_progress(redis_client, quiz_id, progress_bar, qlogger, "validation")
+                update_progress(
+                    redis_client, quiz_id, progress_bar, qlogger, "validation"
+                )
 
                 # Evaluation phase
                 # eval_start = time.monotonic()
                 qlogger.info(f"[Response {index}] Starting evaluation...")
-                update_progress(redis_client, quiz_id, progress_bar, qlogger, "evaluation_start")
+                update_progress(
+                    redis_client, quiz_id, progress_bar, qlogger, "evaluation_start"
+                )
                 desc_eval_time = float(os.getenv("DESC_EVAL_TIME", 20))  # Worst Case
                 fitb_eval_time = float(os.getenv("FITB_EVAL_TIME", 20))
                 num_desc = question_count_by_type.get("DESCRIPTIVE", 0)
@@ -246,7 +250,13 @@ async def bulk_evaluate_quiz_responses(
                                     quiz_result, types_to_evaluate
                                 )
                             )
-                            update_progress(redis_client, quiz_id, progress_bar, qlogger, "evaluation_in_progress")
+                            update_progress(
+                                redis_client,
+                                quiz_id,
+                                progress_bar,
+                                qlogger,
+                                "evaluation_in_progress",
+                            )
                             heartbeat_interval = 10  # seconds between heartbeat logs
                             while not task.done():
                                 await asyncio.sleep(heartbeat_interval)
@@ -259,7 +269,13 @@ async def bulk_evaluate_quiz_responses(
                             asyncio.shield(eval_with_heartbeat()),
                             timeout=computed_timeout,
                         )
-                        update_progress(redis_client, quiz_id, progress_bar, qlogger, "evaluation_complete")
+                        update_progress(
+                            redis_client,
+                            quiz_id,
+                            progress_bar,
+                            qlogger,
+                            "evaluation_complete",
+                        )
                     except asyncio.TimeoutError:
                         qlogger.error(
                             f"[Response {index}] Evaluation timed out (>{computed_timeout}). Retrying {attempt + 1}"
@@ -293,7 +309,13 @@ async def bulk_evaluate_quiz_responses(
                 # Update progress atomically
                 with threading.Lock():
                     progress_bar.update(1)
-                    update_progress(redis_client, quiz_id, progress_bar, qlogger, "evaluation_in_progress")
+                    update_progress(
+                        redis_client,
+                        quiz_id,
+                        progress_bar,
+                        qlogger,
+                        "evaluation_in_progress",
+                    )
 
                 return {
                     "result": evaluated_result,
@@ -506,11 +528,11 @@ async def bulk_evaluate_quiz_responses(
 
         except Exception as e:
             qlogger.error(
-                f"Error in evaluation cleanup for quiz {quiz_id}: {str(e)}",
+                f"Error in evaluation creating quizreport/setting quiz as evaluated for quiz {quiz_id}: {str(e)}",
                 exc_info=True,
             )
             raise EvaluationError(
-                f"Evaluation completed but failed during cleanup: {str(e)}"
+                f"Evaluation completed but failed during quizreport/setting quiz as evaluated: {str(e)}"
             )
 
     finally:
@@ -523,10 +545,16 @@ async def bulk_evaluate_quiz_responses(
     return quiz_responses
 
 
-def update_progress(redis_client: Redis, quiz_id: str, progress_bar: tqdm, logger=None, phase: str = None) -> None:
+def update_progress(
+    redis_client: Redis,
+    quiz_id: str,
+    progress_bar: tqdm,
+    logger=None,
+    phase: str = None,
+) -> None:
     """
     Update progress tracking in Redis for a quiz evaluation.
-    
+
     Args:
         redis_client: Redis client instance
         quiz_id: The ID of the quiz being evaluated
@@ -539,10 +567,10 @@ def update_progress(redis_client: Redis, quiz_id: str, progress_bar: tqdm, logge
         total = progress_bar.total
         progress_percent = (progress / total) * 100 if total > 0 else 0
         current_time = datetime.now()
-        
+
         elapsed = progress_bar.format_dict.get("elapsed", 0)
         rate = progress_bar.format_dict.get("rate", 0)
-        
+
         # Get remaining time
         remaining_time = (total - progress) / rate if rate and total else 0
 
@@ -554,20 +582,22 @@ def update_progress(redis_client: Redis, quiz_id: str, progress_bar: tqdm, logge
             "rate": rate,
             "remaining": remaining_time,
             "last_update": current_time.isoformat(),
-            "current_phase": phase
+            "current_phase": phase,
         }
-        
+
         # Use a short expiry time to auto-cleanup stale progress
         redis_client.setex(
             f"quiz_progress:{quiz_id}",
             CACHE_EX,  # Use same cache expiry time as other quiz data
-            json.dumps(progress_data)
+            json.dumps(progress_data),
         )
-        
+
         if logger:
             status = f" [{phase}]" if phase else ""
-            logger.debug(f"Progress updated{status}: {progress}/{total} ({progress_percent:.1f}%) at {current_time.strftime('%H:%M:%S')}")
-            
+            logger.debug(
+                f"Progress updated{status}: {progress}/{total} ({progress_percent:.1f}%) at {current_time.strftime('%H:%M:%S')}"
+            )
+
     except Exception as e:
         if logger:
             logger.warning(f"Failed to update progress tracking: {str(e)}")

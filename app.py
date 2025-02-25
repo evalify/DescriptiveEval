@@ -4,15 +4,16 @@ import time
 import uuid
 import json
 from contextlib import asynccontextmanager
-from typing import Optional, Dict
+from typing import  Union
 
 import deprecated
 import psutil
-from fastapi import FastAPI, Depends, Request, HTTPException
+from fastapi import FastAPI, Depends, Request, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
+from fastapi.responses import HTMLResponse
 from rq import Queue, Worker
 from rq.job import JobStatus
 from rq.command import send_stop_job_command
@@ -22,13 +23,22 @@ from evaluation import (
     get_quiz_responses,
     get_all_questions,
 )
-from model import (
+from scoring import (
     LLMProvider,
     get_llm,
     score,
     generate_guidelines,
     enhance_question_and_answer,
 )
+
+from models import (
+    QueryRequest,
+    ProviderRequest,
+    GuidelinesRequest,
+    QAEnhancementRequest,
+    EvalRequest,
+)
+
 from utils.database import get_postgres_cursor, get_mongo_client, get_redis_client
 from utils.errors import InvalidInputError, EmptyAnswerError, InvalidQuizIDError
 from utils.logger import logger
@@ -36,6 +46,29 @@ from utils.quiz.quiz_report import generate_quiz_report, save_quiz_report
 from utils.redisQueue import job as rq_job
 from utils.redisQueue.lock import QuizLock
 from utils.redisQueue.wakeup_workers import spawn_workers, check_workers
+
+
+import secrets
+from fastapi.security import HTTPBasic
+
+
+security = HTTPBasic()
+PathLike = Union[str, "os.PathLike[str]"]
+
+
+async def verify_username(request: Request) -> str:
+    """Verify username and password from HTTP Basic Auth."""
+    credentials = await security(request)
+
+    correct_username = secrets.compare_digest(credentials.username, os.getenv("USERNAME", "admin"))
+    correct_password = secrets.compare_digest(credentials.password, os.getenv("PASSWORD", "admin@123"))
+    if not (correct_username and correct_password):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
 
 
 @asynccontextmanager
@@ -247,7 +280,15 @@ async def lifespan(app: FastAPI):
 
 
 # Initialize FastAPI with lifespan manager
-app = FastAPI(lifespan=lifespan)
+app = FastAPI(
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url="/api/openapi.json",
+    title="DescEval",
+    description="Evaluation Backend for Evalify",
+    version="0.3.4"
+)
 logger.info("Initializing FastAPI application")
 
 # Store current provider in app state
@@ -263,7 +304,6 @@ app.state.current_micro_llm_model_name = (
 )
 app.state.current_micro_llm_api_key = None  # os.getenv("GROQ_API_KEY")
 
-app.mount("/static", StaticFiles(directory="static"), name="static")
 
 app.add_middleware(
     CORSMiddleware,
@@ -274,6 +314,43 @@ app.add_middleware(
 )
 
 tasks_queue = Queue("task_queue", connection=get_redis_client())
+
+
+class AuthStaticFiles(StaticFiles):
+    def __init__(self, directory: PathLike, *args, **kwargs) -> None:
+        """Initialize with directory and pass other args to parent."""
+        super().__init__(directory=directory, *args, **kwargs)
+
+    async def __call__(self, scope, receive, send) -> None:
+        """Handle authentication before serving static files."""
+        assert scope["type"] == "http"
+
+        request = Request(scope, receive)
+
+        try:
+            # Try to authenticate
+            await verify_username(request)
+            # If authentication succeeds, serve the static file
+            await super().__call__(scope, receive, send)
+        except HTTPException as exc:
+            # If authentication fails, send a proper 401 response
+            if exc.status_code == status.HTTP_401_UNAUTHORIZED:
+                headers = [
+                    (b"content-type", b"text/plain"),
+                    (b"www-authenticate", b'Basic realm="Authentication Required"'),
+                ]
+                await send(
+                    {"type": "http.response.start", "status": 401, "headers": headers}
+                )
+                await send(
+                    {"type": "http.response.body", "body": b"Authentication required"}
+                )
+            else:
+                # For other exceptions, re-raise
+                raise
+
+
+app.mount("/static", AuthStaticFiles(directory="static"), name="static")
 
 
 @app.middleware("http")
@@ -288,46 +365,6 @@ async def log_requests(request: Request, call_next):
         f"Duration: {duration:.3f}s"
     )
     return response
-
-
-class QueryRequest(BaseModel):
-    question: str = None
-    student_ans: str
-    expected_ans: str
-    total_score: int
-    guidelines: Optional[str] = None  # Added guidelines field
-
-
-class ProviderRequest(BaseModel):
-    provider: str
-    provider_model_name: str = None
-    provider_api_key: str = None
-    service: str = "macro"
-
-
-class GuidelinesRequest(BaseModel):
-    question: str = None
-    expected_ans: str = None
-    total_score: int = 10
-
-
-class QAEnhancementRequest(BaseModel):
-    question: str
-    expected_ans: str
-
-
-class EvalRequest(BaseModel):
-    quiz_id: str
-    override_evaluated: bool = False
-    override_locked: bool = False
-    override_cache: bool = False
-    types_to_evaluate: Optional[Dict[str, bool]] = {
-        "MCQ": True,
-        "DESCRIPTIVE": True,
-        "CODING": True,
-        "TRUE_FALSE": True,
-        "FILL_IN_BLANK": True,
-    }
 
 
 @app.get("/")
@@ -351,6 +388,17 @@ def get_micro_llm_dependency():
         api_key=app.state.current_micro_llm_api_key,
     )
 
+
+@app.get("/docs", response_class=HTMLResponse)
+async def get_docs(username: str = Depends(verify_username)) -> HTMLResponse:
+    return get_swagger_ui_html(openapi_url="/api/openapi.json", title="docs")
+
+
+@app.get("/redoc", response_class=HTMLResponse)
+async def get_redoc(username: str = Depends(verify_username)) -> HTMLResponse:
+    return get_redoc_html(openapi_url="/api/openapi.json", title="redoc")
+
+
 @app.get("/get-provider")
 async def get_provider():
     return {
@@ -362,6 +410,7 @@ async def get_provider():
         "micro_api_key": app.state.current_micro_llm_api_key,
         "available_providers": [provider.value for provider in LLMProvider],
     }
+
 
 @app.post("/set-provider")
 async def change_provider(request: ProviderRequest):
@@ -507,6 +556,7 @@ async def evaluate_bulk(request: EvalRequest, llm=Depends(get_llm_dependency)):
         postgres_cursor.close()
         postgres_conn.close()
 
+
 @app.get("/evaluate/status/{quiz_id}")
 async def get_evaluation_status(quiz_id: str, redis_client=Depends(get_redis_client)):
     """
@@ -520,18 +570,20 @@ async def get_evaluation_status(quiz_id: str, redis_client=Depends(get_redis_cli
         dict: A dictionary containing the quiz_id and either the progress details or a message.
     """
     progress = redis_client.get(f"quiz_progress:{quiz_id}")
-    
+
     if progress:
         try:
             progress = json.loads(progress)
         except json.JSONDecodeError as e:
-            logger.error(f"Error decoding JSON for quiz {quiz_id} while checking status: {str(e)}")
+            logger.error(
+                f"Error decoding JSON for quiz {quiz_id} while checking status: {str(e)}"
+            )
             return {"quiz_id": quiz_id, "message": "Invalid progress data"}
-        
+
         return {"quiz_id": quiz_id, **(progress or {})}
-    
+
     return {"quiz_id": quiz_id, "message": "No Evaluation is Running"}
-    
+
 
 @app.post("/evaluate")
 async def evaluate_bulk_queue(
@@ -758,7 +810,7 @@ async def stop_jobs(quiz_id: str):
                 finally:
                     current_job.cancel()
                     current_job.save()
-        
+
         # Unlock the quiz
         quiz_lock = QuizLock(redis_conn, quiz_id)
         if quiz_lock.is_locked():

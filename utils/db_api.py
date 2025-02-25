@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from redis import Redis
 
 # Custom imports
-from model import generate_guidelines
+from scoring import generate_guidelines
 from utils.logger import logger
 from utils.misc import DateTimeEncoder, save_quiz_data
 

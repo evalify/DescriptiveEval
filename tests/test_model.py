@@ -1,6 +1,6 @@
 import pytest
 
-from model import (
+from scoring import (
     get_llm,
     LLMProvider,
     score,

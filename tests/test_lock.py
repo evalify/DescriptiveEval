@@ -5,7 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from redis import Redis
 
-from model import LLMProvider
+from scoring import LLMProvider
 from utils.redisQueue.job import evaluation_job
 from utils.redisQueue.lock import QuizLock
 

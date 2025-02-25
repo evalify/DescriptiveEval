@@ -1,7 +1,7 @@
 import asyncio
 
 from evaluation import bulk_evaluate_quiz_responses
-from model import get_llm
+from scoring import get_llm
 from utils.database import get_db_cursor, get_mongo_client, get_redis_client
 from utils.errors import (
     NoQuestionsError,

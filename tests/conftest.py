@@ -8,7 +8,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 import pytest
 from httpx import AsyncClient
 import subprocess
-from model import get_llm, LLMProvider
+from scoring import get_llm, LLMProvider
 from .fixtures import mock_questions, mock_responses, mock_evaluation_settings
 
 # Create logs directory if it doesn't exist

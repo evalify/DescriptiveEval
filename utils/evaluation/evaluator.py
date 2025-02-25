@@ -8,7 +8,7 @@ import itertools
 import threading
 from datetime import datetime
 from typing import Optional, Dict, Any
-from model import get_llm, score, score_fill_in_blank, EvaluationStatus, LLMProvider
+from scoring import get_llm, score, score_fill_in_blank, EvaluationStatus, LLMProvider
 from utils.errors import (
     LLMEvaluationError,
     MCQEvaluationError,
