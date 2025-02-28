@@ -8,7 +8,7 @@ import itertools
 import threading
 from datetime import datetime
 from typing import Optional, Dict, Any
-from app.api.scoring.scoring import (
+from app.api.scoring.service import (
     get_llm,
     score,
     score_fill_in_blank,

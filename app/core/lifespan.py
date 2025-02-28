@@ -3,8 +3,6 @@ import os
 import time
 from contextlib import asynccontextmanager
 import psutil
-import pyfiglet
-import termcolor
 from rq import Worker, Queue
 from rq.command import send_stop_job_command
 from fastapi import FastAPI
@@ -19,9 +17,17 @@ async def lifespan(app: FastAPI):
     redis_conn = get_redis_client()
 
     # Display ASCII banner
-    ascii_banner = pyfiglet.figlet_format("Desc Eval", font="slant")
-    ascii_banner = termcolor.colored(ascii_banner, color="cyan")
-    print(ascii_banner)
+    try:
+        import pyfiglet
+        import termcolor
+        ascii_banner = pyfiglet.figlet_format("Desc Eval", font="slant")
+        colored_ascii_banner = termcolor.colored(ascii_banner, color="cyan")
+        print(colored_ascii_banner)
+    except ImportError:
+        print("DescEval")
+    except Exception as e:
+        logger.error(f"Error displaying ASCII banner: {str(e)}")
+    
     print("Initializing Evaluation Backend for Evalify...")
 
     # Startup: Initialize workers

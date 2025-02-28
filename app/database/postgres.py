@@ -15,9 +15,10 @@ from psycopg2.extensions import (
 from psycopg2.extras import RealDictCursor
 from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.errors import ActiveSqlTransaction, QueryCanceledError
-from app.core.logger import logger
-from app.utils.database_monitoring import QueryMonitor
 import uuid
+
+from app.core.logger import logger
+from .database_monitoring import QueryMonitor
 
 # Clean up pools on module unload
 import atexit

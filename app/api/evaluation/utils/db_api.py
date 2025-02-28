@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from redis import Redis
 
 # Custom imports
-from app.api.scoring.scoring import generate_guidelines
+from app.api.scoring.service import generate_guidelines
 from app.core.logger import logger
 from app.utils.misc import DateTimeEncoder, save_quiz_data
 

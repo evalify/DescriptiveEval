@@ -11,7 +11,7 @@ from .templates import (
 )
 from app.core.logger import logger
 from app.core.enums import EvaluationStatus, LLMProvider
-from app.api.provider.provider import get_llm
+from app.api.provider.service import get_llm
 
 load_dotenv()
 

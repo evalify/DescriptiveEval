@@ -5,7 +5,7 @@ from app.core.logger import logger
 from fastapi import APIRouter, Depends, HTTPException
 
 from .models import EvalRequest
-from app.api.evaluation.evaluation import (
+from app.api.evaluation.service import (
     bulk_evaluate_quiz_responses,
     get_quiz_responses,
     get_all_questions,

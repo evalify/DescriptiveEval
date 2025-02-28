@@ -1,4 +1,4 @@
-from app.api.scoring.scoring import get_llm
+from app.api.scoring.service import get_llm
 from fastapi import Request, Depends, FastAPI
 
 

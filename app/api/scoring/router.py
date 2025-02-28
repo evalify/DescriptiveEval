@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends
-from .scoring import (
+from .service import (
     score,
     generate_guidelines,
     enhance_question_and_answer,
