@@ -12,7 +12,7 @@ import uuid
 import os
 
 # Router
-router = APIRouter(prefix="/scoring", tags=["scoring"])
+router = APIRouter(prefix="/scoring", tags=["Scoring"])
 
 @router.post("/score")
 async def get_response(request: QueryRequest, llm=Depends(get_llm_dependency)):
@@ -54,7 +54,7 @@ async def generate_guidelines_api(
 
     try:
         errors = []
-        MAX_RETRIES = int(os.getenv("MAX_RETRIES", 10))
+        MAX_RETRIES = int(os.getenv("MAX_RETRIES", 10)) #TODO: Move Constants to constant.py
         for attempt in range(MAX_RETRIES):
             guidelines_result = await generate_guidelines(
                 llm,

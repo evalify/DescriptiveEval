@@ -3,9 +3,8 @@ from app.core.logger import logger
 from fastapi import APIRouter, HTTPException, Depends
 from app.core.enums import LLMProvider
 from app.core.dependencies import get_app
-router = APIRouter()
 
-
+router = APIRouter(prefix="/provider", tags=["Provider"])
 
 @router.get("/get-provider")
 async def get_provider(app=Depends(get_app)):

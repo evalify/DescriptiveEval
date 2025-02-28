@@ -11,6 +11,7 @@ fastapi
 redis
 tqdm
 uvicorn
+requests
 rq
 psutil
 colorlog

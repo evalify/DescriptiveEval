@@ -1,7 +1,7 @@
 import asyncio
 
 from evaluation import bulk_evaluate_quiz_responses
-from scoring import get_llm
+from app.api.provider.provider import get_llm
 from app.database.postgres import get_db_cursor
 from app.database.mongo import get_mongo_client
 from app.database.redis import get_redis_client

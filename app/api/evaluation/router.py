@@ -2,7 +2,7 @@ import json
 import os
 import uuid
 from app.core.logger import logger
-from fastapi import APIRouter, Depends, HTTPException, FastAPI
+from fastapi import APIRouter, Depends, HTTPException
 
 from .models import EvalRequest
 from app.api.evaluation.evaluation import (
@@ -18,12 +18,12 @@ from app.database.postgres import get_postgres_cursor
 from app.database.redis import get_redis_client
 
 from .utils.lock import QuizLock
-from app.api.evaluation.utils.evaluation_job import evaluation_job as rq_job
-from app.core.dependencies import get_llm_dependency
+from app.api.evaluation.utils.evaluation_job import evaluation_job
+from app.core.dependencies import get_llm_dependency, get_app
 import deprecated
 
 # Router
-router = APIRouter(prefix="/evaluation", tags=["evaluation"])
+router = APIRouter(prefix="/evaluation", tags=["Evaluation"])
 
 
 @deprecated.deprecated(reason="Use /evaluate instead")
@@ -54,7 +54,7 @@ async def evaluate_bulk(request: EvalRequest, llm=Depends(get_llm_dependency)):
         postgres_conn.close()
 
 
-@router.get("/evaluate/status/{quiz_id}")
+@router.get("/status/{quiz_id}")
 async def get_evaluation_status(quiz_id: str, redis_client=Depends(get_redis_client)):
     """
     Retrieve the evaluation progress status for a given quiz.
@@ -85,6 +85,7 @@ async def get_evaluation_status(quiz_id: str, redis_client=Depends(get_redis_cli
 @router.post("/evaluate")
 async def evaluate_bulk_queue(
     request: EvalRequest,
+    app = Depends(get_app),
 ):
     trace_id = uuid.uuid4()
     logger.info(f"[{trace_id}] Queueing evaluation for quiz_id: {request.quiz_id}")
@@ -93,7 +94,6 @@ async def evaluate_bulk_queue(
         # Check if quiz is already being evaluated
         redis_client = get_redis_client()
         quiz_lock = QuizLock(redis_client, request.quiz_id)
-        app: FastAPI = request.scope["app"]
         app.state.quiz_locks[request.quiz_id] = quiz_lock
 
         if quiz_lock.is_locked():
@@ -117,10 +117,10 @@ async def evaluate_bulk_queue(
                         "remaining_time": remaining_time,
                     },
                 )
-        app: FastAPI = request.scope["app"]
-        tasks_queue = app.state.tasks_queue
-        job = tasks_queue.enqueue(
-            rq_job.evaluation_job,
+
+        task_queue = app.state.task_queue
+        job = task_queue.enqueue(
+            evaluation_job,
             request.quiz_id,
             app.state.current_provider,
             app.state.current_model_name,

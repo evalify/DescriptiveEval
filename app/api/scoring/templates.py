@@ -105,7 +105,7 @@ Define the scoring approach for each criterion.
 {format_instructions}
 
 To be clear, you need to output json in type {{\"guidelines\": \"insert guidelines here\"}}.
-Note, guidelines should be within \"double quoutes\", ensure proper json formatting. If there are errors, it's most probably due to incorrect json formatting.
+Note, guidelines should be within \"double quotes\", ensure proper json formatting. If there are errors, it's most probably due to incorrect json formatting.
 All criteria should be in this str and in proper markdown format.
 The sum of all criteria scores should be equal to the total score. Mention the total score.
 You need to list out criteria for evaluation and also on the strictness of evaluation, whether spelling mistakes should be penalized heavily or not.

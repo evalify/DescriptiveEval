@@ -109,7 +109,7 @@ class InvalidProviderError(EvaluationError):
     def __init__(self, provider: str):
         super().__init__(
             f"Invalid LLM provider specified: {provider}.\n"
-            "Supported providers are: 'ollama', 'groq'."
+            "Supported providers are: 'ollama', 'groq', 'vllm'."
         )
 
 class InvalidInputError(EvaluationError):

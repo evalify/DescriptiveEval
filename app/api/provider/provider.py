@@ -14,7 +14,7 @@ def get_llm(provider: LLMProvider = LLMProvider.GROQ, api_key=None, model_name=N
     :param api_key: The API key for the provider (optional)
     :param model_name: The model name for the provider (optional)
     """
-    if provider == LLMProvider.VLLM:
+    if provider.value == LLMProvider.VLLM.value:
         return ChatOpenAI(
             model_name=model_name or "meta-llama/Meta-Llama-3.1-8B-Instruct",
             base_url=os.getenv("VLLM_HOST", "http://localhost:8000"),
@@ -22,13 +22,13 @@ def get_llm(provider: LLMProvider = LLMProvider.GROQ, api_key=None, model_name=N
             api_key=api_key or "123",
         )
 
-    elif provider == LLMProvider.OLLAMA:
+    elif provider.value == LLMProvider.OLLAMA.value:
         return ChatOllama(
             model=model_name if model_name else "llama3.3",
             base_url=os.getenv("OLLAMA_HOST", "http://localhost:11434"),
             temperature=0.2,
         )
-    elif provider == LLMProvider.GROQ:
+    elif provider.value == LLMProvider.GROQ.value:
         return ChatGroq(
             model_name=model_name if model_name else "llama-3.3-70b-specdec",
             temperature=0.2,

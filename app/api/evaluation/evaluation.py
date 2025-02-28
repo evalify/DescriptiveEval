@@ -13,7 +13,6 @@ from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm
 import threading
 from app.database.postgres import get_db_cursor
-from app.database.redis import get_redis_client
 from contextlib import asynccontextmanager
 
 # Custom imports
@@ -102,6 +101,7 @@ async def bulk_evaluate_quiz_responses(
         llm: Optional LLM instance to use for evaluation
         override_evaluated (bool): Whether to re-evaluate already evaluated responses
         types_to_evaluate (dict): List of question types to evaluate
+        override_cache (bool): Override the cache and fetch fresh data
 
     Returns:
         List of evaluated quiz responses

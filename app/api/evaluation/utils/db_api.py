@@ -230,11 +230,10 @@ def get_all_questions(
     """
     Get all questions for a quiz from MongoDB
     :param mongo_db: The MongoDB database object i.e, client[db]
-    :param save_to_file: Save the questions to a file (default: True)
-    :param override_cache: Override the cache if set to True (default: False)
+    :param redis_client: Redis client for caching
     :param quiz_id: The ID of the quiz to retrieve questions for
     :param save_to_file: Save the questions to a file (default: True)
-    :param save_to_file: Save the questions to a file (default: True)
+    :param override_cache: Override the cache if set to True (default: False)
     """
     cached_questions = redis_client.get(f"questions:{quiz_id}_questions_evalcache")
     if cached_questions and not override_cache:

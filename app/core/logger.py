@@ -7,7 +7,7 @@ from datetime import datetime
 from pathlib import Path
 import socket
 import os
-from pythonjsonlogger import jsonlogger
+from pythonjsonlogger import json as jsonlogger
 
 # Create logs directory if it doesn't exist
 log_dir = Path("logs")

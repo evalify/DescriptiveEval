@@ -10,10 +10,10 @@ import psutil
 import uuid
 
 # Router
-router = APIRouter(prefix="/workers", tags=["workers"])
+router = APIRouter(prefix="/workers", tags=["Workers"])
 
 
-@router.get("/workers/status")
+@router.get("/status")
 async def get_workers_status(app=Depends(get_app)):
     """Get detailed status of all worker processes and queue information"""
     trace_id = uuid.uuid4()
@@ -176,15 +176,15 @@ async def stop_jobs(quiz_id: str):
         )
 
 
-@router.post("/workers/kill/{pid}")
+@router.post("/kill/{pid}")
 async def kill_worker(pid: int, request: Request, app=Depends(get_app)):
     """Force quit a specific worker process by PID with optional replacement."""
     trace_id = uuid.uuid4()
     logger.info(f"[{trace_id}] Attempting to kill worker with PID: {pid}")
 
     # Extract parameters from request body
-    spawn_replacement = request.json().get("spawn_replacement", True)
-    kill_mode = request.json().get("mode", "immediate")  # TODO: Implement graceful kill
+    spawn_replacement = request.get("spawn_replacement", True)
+    kill_mode = request.get("mode", "immediate")  # TODO: Implement graceful kill
 
     logger.info(
         f"[{trace_id}] Kill mode: {kill_mode}, Spawn replacement: {spawn_replacement}"

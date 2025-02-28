@@ -24,7 +24,7 @@ class EvaluationLogger:
                     self.evaluation_data = json.load(f)
             except json.JSONDecodeError:
                 pass
-
+    @staticmethod
     def _get_question_answer(
         self, question_data: Dict[str, Any], question_type: str
     ) -> Union[str, list, None]:
@@ -43,6 +43,7 @@ class EvaluationLogger:
             }
         return None
 
+    @staticmethod
     def _get_question_data(self, question_data: Dict[str, Any]) -> Dict[str, Any]:
         """Safely extract question data with type-specific handling"""
         question_type = question_data.get("type", "").upper()
@@ -88,6 +89,7 @@ class EvaluationLogger:
 
         return base_data
 
+    @staticmethod
     def _validate_answer_format(self, question_type: str, answer: Any) -> bool:
         """Validate the answer format based on question type"""
         if question_type == "MCQ":
@@ -106,6 +108,7 @@ class EvaluationLogger:
             return isinstance(answer, dict) and "driverCode" in answer
         return False
 
+    @staticmethod
     def _format_student_answer(self, answer: Any, question_type: str) -> Any:
         """Format student answer based on question type for consistent storage"""
         if question_type in ["MCQ", "TRUE_FALSE"]:
@@ -306,6 +309,7 @@ class EvaluationLogger:
 
         return stats
 
+    @staticmethod
     def _analyze_common_errors(self, responses: Dict[str, Any]) -> list:
         """Analyze common errors in responses"""
         error_counts = {}

@@ -247,7 +247,7 @@ async def generate_guidelines(
 
 
 async def enhance_question_and_answer(
-    llm, question: str, expected_ans: str, errors: list = []
+    llm, question: str, expected_ans: str, errors: list = None
 ) -> dict:
     """
     Enhance the question and expected answer to be clear, concise, and direct.
@@ -257,6 +257,9 @@ async def enhance_question_and_answer(
     :param expected_ans: The expected answer to enhance
     :param errors: Any errors encountered during enhancement (optional)
     """
+    if errors is None:
+        errors = []
+
     if not question or not expected_ans:
         logger.error("Provide a question and expected answer to enhance the content")
         return {
