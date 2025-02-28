@@ -1,6 +1,7 @@
 from pydantic import BaseModel
 from typing import Optional, Dict
 
+
 class EvalRequest(BaseModel):
     quiz_id: str
     override_evaluated: bool = False

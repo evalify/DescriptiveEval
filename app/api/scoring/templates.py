@@ -1,6 +1,6 @@
 """This module contains all the templates for the different tasks in the evaluation pipeline."""
 
-evaluation_template = '''
+evaluation_template = """
 You are an expert evaluator. Your task is to:
 
 1. Prepare an evaluation rubric for the question and expected answer based on the guidelines. This will be your interpretation of the guidelines. Try to stick to the guidelines as much as possible.
@@ -52,10 +52,10 @@ You will be given multiple chances to answer if the system detects errors in you
 Your output should contain a json object marked within ```json ... ``` containing the above mentioned fields.
 
 Errors accumulated so far: {errors}
-'''
+"""
 
 # 3. Be stringent in evaluating the correctness and relevance of the student's answer.
-fill_in_the_blank_template = '''
+fill_in_the_blank_template = """
 You are an expert evaluator. Your task is to:
 
 1. Given a fill-in-the-blank question, evaluate the student's answer based on the expected answer.
@@ -89,7 +89,7 @@ Total Score to evaluate for: {total_score}
 The score you allocate should not exceed this total score.
 
 Your output should contain a json object marked within ```json ... ``` containing the above mentioned fields.
-'''
+"""
 
 guidelines_template = """
 You are an expert rubric creator. 

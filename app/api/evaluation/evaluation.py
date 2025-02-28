@@ -242,6 +242,7 @@ async def bulk_evaluate_quiz_responses(
                 computed_timeout = max(
                     (num_desc * desc_eval_time) + (num_fitb * fitb_eval_time), 90
                 )
+                attempt = 0
                 for attempt in range(int(os.getenv("EVAL_MAX_RETRIES", 10))):
                     try:
 
@@ -605,7 +606,9 @@ def update_progress(
 
 
 if __name__ == "__main__":
-    from utils.database import get_postgres_cursor, get_mongo_client, get_redis_client
+    from app.database.postgres import get_postgres_cursor
+    from app.database.mongo import get_mongo_client
+    from app.database.redis import get_redis_client
 
     my_pg_cursor, my_pg_conn = get_postgres_cursor()
     my_mongo_db = get_mongo_client()

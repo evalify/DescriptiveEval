@@ -1,6 +1,6 @@
 import asyncio
 
-from evaluation import bulk_evaluate_quiz_responses
+from ..evaluation import bulk_evaluate_quiz_responses
 from app.api.provider.provider import get_llm
 from app.database.postgres import get_db_cursor
 from app.database.mongo import get_mongo_client
@@ -22,7 +22,7 @@ from app.core.logger import logger, QuizLogger
 from .lock import QuizLock
 
 # Group errors by category for cleaner handling
-EVALUATION_ERRORS = {   #TODO: Isn't it better to just define these as defaults in errors.py ?
+EVALUATION_ERRORS = {  # TODO: Isn't it better to just define these as defaults in errors.py ?
     # Configuration errors
     NoQuestionsError: ("Quiz Configuration Error", "No questions configured"),
     InvalidQuestionError: ("Question Configuration Error", "Invalid question setup"),

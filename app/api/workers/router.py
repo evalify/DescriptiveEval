@@ -28,6 +28,8 @@ async def get_workers_status(app=Depends(get_app)):
         redis_conn = get_redis_client()
         queue = Queue("task_queue", connection=redis_conn)
 
+        queued_jobs = failed_jobs = completed_jobs = ()
+
         try:
             # Get jobs from different states with error handling
             queued_jobs = queue.get_jobs() or []

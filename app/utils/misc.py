@@ -18,14 +18,16 @@ class DateTimeEncoder(json.JSONEncoder):
 
 # Create a function that will remove all html tags in a given string
 def remove_html_tags(data):
-    p = re.compile(r'<.*?>')    #TODO: Escape html tags when question itself needs explicit html tags like a UI quiz
-    return p.sub('', data)
+    p = re.compile(
+        r"<.*?>"
+    )  # TODO: Escape html tags when question itself needs explicit html tags like a UI quiz
+    return p.sub("", data)
 
 
 def save_quiz_data(data: Any, quiz_id: str, file_type: str) -> None:
     """
     Save quiz related data to a JSON file in a quiz-specific directory.
-    
+
     Args:
         data: The data to save (must be JSON serializable)
         quiz_id: The ID of the quiz
@@ -33,24 +35,27 @@ def save_quiz_data(data: Any, quiz_id: str, file_type: str) -> None:
     """
     try:
         # Create quiz directory if it doesn't exist
-        quiz_dir = Path('data/json') / quiz_id
+        quiz_dir = Path("data/json") / quiz_id
         quiz_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Determine filename based on type
         filename = f"{file_type}.json"
         file_path = quiz_dir / filename
-        
-        with open(file_path, 'w') as f:
+
+        with open(file_path, "w") as f:
             json.dump(data, f, indent=4, cls=DateTimeEncoder)
         logger.debug(f"Saved {file_type} data for quiz {quiz_id}")
-        
+
     except IOError as e:
         logger.error(f"Failed to save {file_type} data for quiz {quiz_id}: {str(e)}")
     except Exception as e:
-        logger.error(f"Unexpected error saving {file_type} data for quiz {quiz_id}: {str(e)}", exc_info=True)
+        logger.error(
+            f"Unexpected error saving {file_type} data for quiz {quiz_id}: {str(e)}",
+            exc_info=True,
+        )
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     # Sample data
     my_data = {
         "_id": "678f1e9ddf031e96652e5c1e",
@@ -62,9 +67,13 @@ if __name__ == '__main__':
     }
 
     # Convert data to JSON with custom DateTimeEncoder
-    json_data = json.dumps(my_data, cls=DateTimeEncoder, indent=4)  # Testing the DateTimeEncoder
+    json_data = json.dumps(
+        my_data, cls=DateTimeEncoder, indent=4
+    )  # Testing the DateTimeEncoder
     print(json_data)
 
     # Remove HTML tags from description
-    cleaned_description = remove_html_tags(my_data['question'])  # Testing the remove_html_tags function
+    cleaned_description = remove_html_tags(
+        my_data["question"]
+    )  # Testing the remove_html_tags function
     print(cleaned_description)

@@ -6,9 +6,9 @@ from app.core.dependencies import get_app
 
 router = APIRouter(prefix="/provider", tags=["Provider"])
 
+
 @router.get("/get-provider")
 async def get_provider(app=Depends(get_app)):
-
     return {
         "provider": app.state.current_provider.value,
         "model_name": app.state.current_model_name,

@@ -85,7 +85,7 @@ async def get_evaluation_status(quiz_id: str, redis_client=Depends(get_redis_cli
 @router.post("/evaluate")
 async def evaluate_bulk_queue(
     request: EvalRequest,
-    app = Depends(get_app),
+    app=Depends(get_app),
 ):
     trace_id = uuid.uuid4()
     logger.info(f"[{trace_id}] Queueing evaluation for quiz_id: {request.quiz_id}")

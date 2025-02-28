@@ -15,8 +15,8 @@ from psycopg2.extensions import (
 from psycopg2.extras import RealDictCursor
 from psycopg2.pool import ThreadedConnectionPool
 from psycopg2.errors import ActiveSqlTransaction, QueryCanceledError
-from utils.logger import logger
-from utils.database_monitoring import QueryMonitor
+from app.core.logger import logger
+from app.utils.database_monitoring import QueryMonitor
 import uuid
 
 # Clean up pools on module unload
@@ -39,7 +39,6 @@ postgres_pool = ThreadedConnectionPool(
     options="-c statement_timeout=30000",  # 30 second timeout
     **keepalive_kwargs,
 )
-
 
 
 def exponential_backoff(attempt, max_attempts=5, base_delay=0.1):
@@ -82,9 +81,6 @@ def get_postgres_cursor() -> Tuple[RealDictCursor, postgres_connection]:
     my_connection.set_session(isolation_level=ISOLATION_LEVEL_READ_COMMITTED)
     cursor = my_connection.cursor(cursor_factory=RealDictCursor)
     return cursor, my_connection
-
-
-
 
 
 def cancel_long_running_queries(conn, pid: int, age_threshold: int = 30):

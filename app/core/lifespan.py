@@ -4,6 +4,7 @@ import time
 from contextlib import asynccontextmanager
 import psutil
 import pyfiglet
+import termcolor
 from rq import Worker, Queue
 from rq.command import send_stop_job_command
 from fastapi import FastAPI
@@ -19,6 +20,7 @@ async def lifespan(app: FastAPI):
 
     # Display ASCII banner
     ascii_banner = pyfiglet.figlet_format("Desc Eval", font="slant")
+    ascii_banner = termcolor.colored(ascii_banner, color="cyan")
     print(ascii_banner)
     print("Initializing Evaluation Backend for Evalify...")
 
@@ -140,7 +142,7 @@ async def lifespan(app: FastAPI):
                                     f"Cancelled job {current_job.id} on worker {process.pid}"
                                 )
                                 # TODO: Add this to config.ini for easy toggling
-                                # Uncomment the following block to requeue the job on shutdown 
+                                # Uncomment the following block to requeue the job on shutdown
                                 # Reset job state
                                 # current_job.set_status(JobStatus.QUEUED)
                                 # current_job.worker_name = None

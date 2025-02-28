@@ -13,8 +13,9 @@ load_dotenv()
 JUDGE_URL = os.getenv("JUDGE_API")
 
 
-async def evaluate_coding_question(student_response: str, driver_code: str, test_cases_count: int = -1) -> Tuple[
-    int, int]:
+async def evaluate_coding_question(
+    student_response: str, driver_code: str, test_cases_count: int = -1
+) -> Tuple[int, int]:
     """
     Evaluate a single student response against test cases
     Returns the number of test cases passed and the total number of test cases
@@ -27,16 +28,20 @@ async def evaluate_coding_question(student_response: str, driver_code: str, test
         print("⚠️ No response submitted")
         return 0
 
-    code_index = student_response.rfind('% Driver Code')
-    cleaned_code = cleanCode(student_response[:code_index] if code_index != -1 else student_response)
+    code_index = student_response.rfind("% Driver Code")
+    cleaned_code = cleanCode(
+        student_response[:code_index] if code_index != -1 else student_response
+    )
 
     try:
         code_output = get_code_result(cleaned_code, driver_code)
-        if code_output.get('stdout'):
-            passed_cases, total_cases = count_test_cases(code_output['stdout'])
+        if code_output.get("stdout"):
+            passed_cases, total_cases = count_test_cases(code_output["stdout"])
 
             if test_cases_count != -1 and total_cases != test_cases_count:
-                print(f"❌ Expected {test_cases_count} test cases but got {total_cases}")
+                print(
+                    f"❌ Expected {test_cases_count} test cases but got {total_cases}"
+                )
                 return -1, -1
 
             if passed_cases == total_cases and total_cases > 0:
@@ -44,9 +49,9 @@ async def evaluate_coding_question(student_response: str, driver_code: str, test
             return passed_cases, total_cases
         print("❌ No output received")
     except requests.exceptions.ReadTimeout:
-        print('❌ Unable to evaluate code - Timeout')
+        print("❌ Unable to evaluate code - Timeout")
     except Exception as e:
-        print(f'❌ Error evaluating code: {str(e)}')
+        print(f"❌ Error evaluating code: {str(e)}")
 
     return 0, -1
 
@@ -58,21 +63,21 @@ def cleanCode(code: str) -> str:
     :return: Cleaned code
     """
     # Regex pattern to match lines without a semicolon at the end
-    semicolon_pattern = r'([^\s;]+)(\s*)(%.*)?$'
+    semicolon_pattern = r"([^\s;]+)(\s*)(%.*)?$"
 
     # Regex pattern to match lines with printing functions (e.g., disp, fprintf)
-    print_pattern = r'^\s*(disp|fprintf)\(.*\)\s*;?'
+    print_pattern = r"^\s*(disp|fprintf)\(.*\)\s*;?"
 
     # Function to add semicolon to the matched lines
     def add_semicolon(match):
         code_line = match.group(1)  # The actual code
-        whitespace = match.group(2) or ''  # Any trailing whitespace
-        comment = match.group(3) or ''  # Any trailing comment
-        return f'{code_line};{whitespace}{comment}'
+        whitespace = match.group(2) or ""  # Any trailing whitespace
+        comment = match.group(3) or ""  # Any trailing comment
+        return f"{code_line};{whitespace}{comment}"
 
     # Function to comment out lines that will lead to printing
     def comment_out_prints(match):
-        return f'% {match.group(0)}'  # Comment out the entire line
+        return f"% {match.group(0)}"  # Comment out the entire line
 
     # First, comment out all printing lines
     code = re.sub(print_pattern, comment_out_prints, code, flags=re.MULTILINE)
@@ -96,13 +101,15 @@ def count_test_cases(code_output: str) -> tuple[int, int]:
     :param code_output:
     :return: successful, total test cases
     """
-    test_cases = code_output.split('\n')
-    successful = test_cases.count('Test case successful!')
-    failed = test_cases.count('Test case failed!')
+    test_cases = code_output.split("\n")
+    successful = test_cases.count("Test case successful!")
+    failed = test_cases.count("Test case failed!")
     return successful, successful + failed
 
 
-def get_code_result(response: str, driver_code: str = None, language_id: int = 66) -> dict:
+def get_code_result(
+    response: str, driver_code: str = None, language_id: int = 66
+) -> dict:
     """
     This function takes the response code and driver code and returns the output of the code
     :param response: Student's code
@@ -115,12 +122,10 @@ def get_code_result(response: str, driver_code: str = None, language_id: int = 6
     else:
         code = response
 
-    headers = {
-        "Content-Type": "application/json"
-    }
+    headers = {"Content-Type": "application/json"}
     data = {
         "source_code": code,
-        "language_id": language_id  # For Octave
+        "language_id": language_id,  # For Octave
     }
     if not JUDGE_URL:
         raise ValueError("JUDGE_API is not set in the environment variables")

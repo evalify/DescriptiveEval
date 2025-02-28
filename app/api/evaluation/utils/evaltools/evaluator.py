@@ -8,7 +8,13 @@ import itertools
 import threading
 from datetime import datetime
 from typing import Optional, Dict, Any
-from scoring import get_llm, score, score_fill_in_blank, EvaluationStatus, LLMProvider
+from app.api.scoring.scoring import (
+    get_llm,
+    score,
+    score_fill_in_blank,
+    EvaluationStatus,
+    LLMProvider,
+)
 from app.core.exceptions import (
     LLMEvaluationError,
     MCQEvaluationError,
@@ -17,8 +23,8 @@ from app.core.exceptions import (
     FillInBlankEvaluationError,
     InvalidQuestionError,
 )
-from utils.evaluation.code_eval import evaluate_coding_question
-from utils.evaluation.static_eval import (
+from .code_eval import evaluate_coding_question
+from .static_eval import (
     evaluate_mcq,
     evaluate_mcq_with_partial_marking,
     evaluate_true_false,
@@ -171,7 +177,9 @@ class ResponseEvaluator:
                     "rate": successes / total if total > 0 else 0,
                 }
 
-            save_quiz_data(self.evaluation_metadata, self.quiz_id, "evaluation_metadata")
+            save_quiz_data(
+                self.evaluation_metadata, self.quiz_id, "evaluation_metadata"
+            )
 
     def _update_response_metadata(
         self, response_id: str, question_id: str, metadata: dict
@@ -217,7 +225,7 @@ class ResponseEvaluator:
                 "student_id": quiz_result.get("studentId"),
                 "start_time": datetime.now().isoformat(),
                 "questions": {},
-        }
+            }
 
         self.qlogger.info(
             f"Evaluating response {quiz_result['id']} for student {quiz_result['studentId']}"
@@ -463,7 +471,7 @@ class ResponseEvaluator:
             score_res = {
                 "score": question_total_score,
                 "reason": "Exact Match",
-                "rubric" : "Exact Match - LLM not used",
+                "rubric": "Exact Match - LLM not used",
                 "breakdown": "Exact Match - LLM not used",
                 "status": EvaluationStatus.SUCCESS,
             }
@@ -518,8 +526,10 @@ class ResponseEvaluator:
                     # self._update_error_stats("LLM_EXCEPTION")
                     if attempt == MAX_RETRIES - 1:
                         raise LLMEvaluationError(qid, errors)
-                    if not self.llm: 
-                        current_llm = get_llm(LLMProvider.GROQ, next(self.groq_api_keys))
+                    if not self.llm:
+                        current_llm = get_llm(
+                            LLMProvider.GROQ, self._get_next_api_key()
+                        )
 
             score_res = last_response
             if not score_res or score_res.get("status") != EvaluationStatus.SUCCESS:
@@ -796,7 +806,7 @@ class ResponseEvaluator:
                         raise FillInBlankEvaluationError(
                             qid, evaluation_attempts, MAX_RETRIES
                         )
-                    current_llm = get_llm(LLMProvider.GROQ, next(self.groq_api_keys))
+                    current_llm = get_llm(LLMProvider.GROQ, self._get_next_api_key())
 
             fitb_score = last_response
             if not fitb_score or fitb_score.get("status") != EvaluationStatus.SUCCESS:
@@ -818,7 +828,9 @@ class ResponseEvaluator:
                     "llmProvider": current_llm.__class__.__name__,
                     "evaluationAttempts": attempt + 1 if "attempt" in locals() else 0,
                     "errors": evaluation_attempts if evaluation_attempts else None,
-                    "evaluationErrors": evaluation_attempts if evaluation_attempts else None,
+                    "evaluationErrors": evaluation_attempts
+                    if evaluation_attempts
+                    else None,
                     "duration": {
                         "total": (datetime.now() - start_time).total_seconds(),
                         "llm": (datetime.now() - llm_start_time).total_seconds(),
