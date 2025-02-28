@@ -19,3 +19,4 @@ uvicorn
 pytest
 pytest-asyncio
 python-json-logger
+pyfiglet

@@ -51,6 +51,7 @@ from utils.redisQueue.wakeup_workers import spawn_workers, check_workers
 import secrets
 from fastapi.security import HTTPBasic
 
+import pyfiglet
 
 security = HTTPBasic()
 PathLike = Union[str, "os.PathLike[str]"]
@@ -60,8 +61,12 @@ async def verify_username(request: Request) -> str:
     """Verify username and password from HTTP Basic Auth."""
     credentials = await security(request)
 
-    correct_username = secrets.compare_digest(credentials.username, os.getenv("USERNAME", "admin"))
-    correct_password = secrets.compare_digest(credentials.password, os.getenv("PASSWORD", "admin@123"))
+    correct_username = secrets.compare_digest(
+        credentials.username, os.getenv("USERNAME", "admin")
+    )
+    correct_password = secrets.compare_digest(
+        credentials.password, os.getenv("PASSWORD", "admin@123")
+    )
     if not (correct_username and correct_password):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -74,6 +79,11 @@ async def verify_username(request: Request) -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     redis_conn = get_redis_client()
+
+    # Display ASCII banner
+    ascii_banner = pyfiglet.figlet_format("Desc Eval", font="slant")
+    print(ascii_banner)
+    print("Initializing Evaluation Backend for Evalify...")
 
     # Startup: Initialize workers
     try:
@@ -832,10 +842,18 @@ async def stop_jobs(quiz_id: str):
 
 
 @app.post("/workers/kill/{pid}")
-async def kill_worker(pid: int, spawn_replacement: bool = True):
+async def kill_worker(pid: int, request: Request):
     """Force quit a specific worker process by PID with optional replacement."""
     trace_id = uuid.uuid4()
     logger.info(f"[{trace_id}] Attempting to kill worker with PID: {pid}")
+
+    # Extract parameters from request body
+    spawn_replacement = request.json().get("spawn_replacement", True)
+    kill_mode = request.json().get("mode", "immediate") # TODO: Implement graceful kill
+
+    logger.info(
+        f"[{trace_id}] Kill mode: {kill_mode}, Spawn replacement: {spawn_replacement}"
+    )
 
     try:
         # Verify the PID belongs to one of our workers

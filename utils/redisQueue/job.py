@@ -20,7 +20,7 @@ from utils.logger import logger, QuizLogger
 from utils.redisQueue.lock import QuizLock
 
 # Group errors by category for cleaner handling
-EVALUATION_ERRORS = {
+EVALUATION_ERRORS = {   #TODO: Isn't it better to just define these as defaults in errors.py ?
     # Configuration errors
     NoQuestionsError: ("Quiz Configuration Error", "No questions configured"),
     InvalidQuestionError: ("Question Configuration Error", "Invalid question setup"),
