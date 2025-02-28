@@ -1,0 +1,168 @@
+import json
+import os
+import uuid
+from app.core.logger import logger
+from fastapi import APIRouter, Depends, HTTPException, FastAPI
+
+from .models import EvalRequest
+from app.api.evaluation.evaluation import (
+    bulk_evaluate_quiz_responses,
+    get_quiz_responses,
+    get_all_questions,
+    generate_quiz_report,
+    save_quiz_report,
+)
+from app.core.exceptions import InvalidQuizIDError
+from app.database.mongo import get_mongo_client
+from app.database.postgres import get_postgres_cursor
+from app.database.redis import get_redis_client
+
+from .utils.lock import QuizLock
+from app.api.evaluation.utils.evaluation_job import evaluation_job as rq_job
+from app.core.dependencies import get_llm_dependency
+import deprecated
+
+# Router
+router = APIRouter(prefix="/evaluation", tags=["evaluation"])
+
+
+@deprecated.deprecated(reason="Use /evaluate instead")
+@router.post("/evaluate-wo-queue")
+async def evaluate_bulk(request: EvalRequest, llm=Depends(get_llm_dependency)):
+    postgres_cursor, postgres_conn = get_postgres_cursor()
+    mongo_db = get_mongo_client()
+    redis_client = get_redis_client()
+    try:
+        results = await bulk_evaluate_quiz_responses(
+            request.quiz_id,
+            postgres_cursor,
+            postgres_conn,
+            mongo_db,
+            redis_client,
+            save_to_file=True,
+            llm=llm,
+        )
+        return {"message": "Evaluation complete", "results": results}
+    except InvalidQuizIDError as e:
+        logger.error(f"Invalid quiz ID error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        logger.error("Error during evaluation", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        postgres_cursor.close()
+        postgres_conn.close()
+
+
+@router.get("/evaluate/status/{quiz_id}")
+async def get_evaluation_status(quiz_id: str, redis_client=Depends(get_redis_client)):
+    """
+    Retrieve the evaluation progress status for a given quiz.
+
+    Args:
+        quiz_id (str): Identifier of the quiz.
+        redis_client: A Redis client dependency for accessing cached progress data.
+
+    Returns:
+        dict: A dictionary containing the quiz_id and either the progress details or a message.
+    """
+    progress = redis_client.get(f"quiz_progress:{quiz_id}")
+
+    if progress:
+        try:
+            progress = json.loads(progress)
+        except json.JSONDecodeError as e:
+            logger.error(
+                f"Error decoding JSON for quiz {quiz_id} while checking status: {str(e)}"
+            )
+            return {"quiz_id": quiz_id, "message": "Invalid progress data"}
+
+        return {"quiz_id": quiz_id, **(progress or {})}
+
+    return {"quiz_id": quiz_id, "message": "No Evaluation is Running"}
+
+
+@router.post("/evaluate")
+async def evaluate_bulk_queue(
+    request: EvalRequest,
+):
+    trace_id = uuid.uuid4()
+    logger.info(f"[{trace_id}] Queueing evaluation for quiz_id: {request.quiz_id}")
+
+    try:
+        # Check if quiz is already being evaluated
+        redis_client = get_redis_client()
+        quiz_lock = QuizLock(redis_client, request.quiz_id)
+        app: FastAPI = request.scope["app"]
+        app.state.quiz_locks[request.quiz_id] = quiz_lock
+
+        if quiz_lock.is_locked():
+            remaining_time = quiz_lock.get_lock_ttl()
+            if request.override_locked:
+                logger.warning(
+                    f"[{trace_id}] Quiz {request.quiz_id} is locked with {remaining_time}s remaining. Overriding lock"
+                )
+                if not quiz_lock.release():
+                    logger.warning(
+                        f"[{trace_id}] Failed to release lock for quiz {request.quiz_id}"
+                    )
+            else:
+                logger.warning(
+                    f"[{trace_id}] Quiz {request.quiz_id} is already being evaluated. Remaining time: {remaining_time}s"
+                )
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "message": f"Quiz {request.quiz_id} is already being evaluated",
+                        "remaining_time": remaining_time,
+                    },
+                )
+        app: FastAPI = request.scope["app"]
+        tasks_queue = app.state.tasks_queue
+        job = tasks_queue.enqueue(
+            rq_job.evaluation_job,
+            request.quiz_id,
+            app.state.current_provider,
+            app.state.current_model_name,
+            app.state.current_api_key,
+            request.override_evaluated,
+            request.types_to_evaluate,
+            request.override_cache,
+            job_timeout=int(os.getenv("WORKER_TTL", "3600")),
+        )
+        logger.info(
+            f"[{trace_id}] Successfully queued evaluation job. Job ID: {job.id}"
+        )
+        return {"message": "Evaluation queued", "job_id": job.id}
+    except HTTPException as e:
+        logger.error(f"[{trace_id}] HTTP Exception: {str(e)}")
+        raise HTTPException(status_code=e.status_code, detail=e.detail)
+    except Exception:
+        logger.error(f"[{trace_id}] Failed to queue evaluation", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/regenerate-quiz-report/{quiz_id}")
+async def regenerate_quiz_report(quiz_id: str):
+    postgres_cursor, postgres_conn = get_postgres_cursor()
+    mongo_db = get_mongo_client()
+    redis_client = get_redis_client()
+    logger.info(f"Regenerating quiz report for quiz_id: {quiz_id}")
+    try:
+        response = get_quiz_responses(postgres_cursor, redis_client, quiz_id)
+        questions = get_all_questions(mongo_db, redis_client, quiz_id)
+        report = await generate_quiz_report(quiz_id, response, questions)
+        await save_quiz_report(
+            quiz_id, report, postgres_cursor, postgres_conn, save_to_file=True
+        )
+        logger.info(f"Quiz report regenerated successfully for quiz_id: {quiz_id}")
+        return {"message": "Quiz report regenerated successfully"}
+    except InvalidQuizIDError as e:
+        logger.error(f"Invalid quiz ID error: {str(e)}")
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception:
+        logger.error("Error regenerating quiz report", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+    finally:
+        postgres_cursor.close()
+        postgres_conn.close()
