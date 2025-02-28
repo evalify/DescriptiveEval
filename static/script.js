@@ -108,7 +108,7 @@ async function updateActiveEvaluations() {
     for (const worker of activeWorkers) {
       const quizId = worker.current_job.quiz_id;
       try {
-        const statusResponse = await fetch(`/evaluate/status/${quizId}`);
+        const statusResponse = await fetch(`/evaluation/status/${quizId}`);
         const statusData = await statusResponse.json();
 
         if (statusData.message === "No Evaluation is Running") {
@@ -380,7 +380,7 @@ async function handleProviderUpdate(e) {
     const modelName = document.getElementById("modelName").value;
     const apiKey = document.getElementById("apiKey").value;
 
-    const response = await fetch("/set-provider", {
+    const response = await fetch("/provider/set-provider", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -403,7 +403,7 @@ async function handleProviderUpdate(e) {
 async function handleScoreTest(e) {
   e.preventDefault();
   try {
-    const response = await fetch("/score", {
+    const response = await fetch("/scoring/score", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -426,7 +426,7 @@ async function handleScoreTest(e) {
 async function handleGuidelinesTest(e) {
   e.preventDefault();
   try {
-    const response = await fetch("/generate-guidelines", {
+    const response = await fetch("/scoring/generate-guidelines", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -448,7 +448,7 @@ async function handleGuidelinesTest(e) {
 async function handleEnhanceTest(e) {
   e.preventDefault();
   try {
-    const response = await fetch("/enhance-qa", {
+    const response = await fetch("/scoring/enhance-qa", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

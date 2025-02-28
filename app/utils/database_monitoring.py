@@ -3,7 +3,7 @@
 import time
 from typing import Dict, Any, Optional
 from threading import Lock
-from utils.logger import logger
+from app.core.logger import logger
 
 
 class QueryMonitor:

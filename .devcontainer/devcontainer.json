@@ -1,6 +1,0 @@
-{
-  "tasks": {
-    "build": "pip install -r requirements.txt",
-    "test": "export GROQ_API_KEY=\"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\" && pytest"
-  }
-}
