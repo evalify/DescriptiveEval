@@ -12,7 +12,7 @@ from rq import Worker
 
 from app.database.redis import get_redis_client
 from app.core.logger import logger
-
+from app.config.constants import WORKER_COUNT
 _worker_stats = {}
 
 
@@ -89,7 +89,7 @@ def spawn_workers(num_workers: int = None):
         num_workers (int): Number of workers to spawn. If None, uses WORKER_COUNT env variable
     """
     if num_workers is None:
-        num_workers = int(os.getenv("WORKER_COUNT", "4"))
+        num_workers = WORKER_COUNT
 
     worker_script = Path(__file__).parent / "worker.py"
     logger.info(f"Spawning {num_workers} workers using script: {worker_script}")

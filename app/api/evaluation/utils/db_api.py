@@ -4,7 +4,6 @@ This module provides abstract functions for interacting with CockroachDB/Mongo/R
 
 import asyncio
 import json
-import os
 from typing import Dict, Any, Optional
 import psycopg2
 from psycopg2.errors import QueryCanceledError
@@ -15,12 +14,8 @@ from redis import Redis
 from app.api.scoring.service import generate_guidelines
 from app.core.logger import logger
 from app.utils.misc import DateTimeEncoder, save_quiz_data
-
+from app.config.constants import CACHE_EX, MAX_RETRIES, DB_MAX_RETRIES
 load_dotenv()
-CACHE_EX = int(os.getenv("CACHE_EX", 3600))  # Cache expiry time in seconds
-MAX_RETRIES = int(
-    os.getenv("MAX_RETRIES", 10)
-)  # Maximum number of retries for LLM evaluation
 
 
 async def get_guidelines(
@@ -170,7 +165,7 @@ async def set_quiz_response(cursor, conn, response: dict):
     """Update database with evaluated results with proper timeout handling"""
     timeout = 30  # seconds
     retries = 0
-    max_retries = int(os.getenv("DB_MAX_RETRIES", 3))
+    max_retries = DB_MAX_RETRIES
 
     while retries < max_retries:
         try:

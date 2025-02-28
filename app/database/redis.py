@@ -3,10 +3,13 @@ from redis import Redis
 import os
 from redis import ConnectionPool
 
+from app.config.constants import REDIS_HOST, REDIS_PORT, REDIS_DB
+
+
 redis_pool = ConnectionPool(
-    host=os.getenv("REDIS_HOST", "localhost"),
-    port=int(os.getenv("REDIS_PORT", 6379)),
-    db=0,
+    host=REDIS_HOST,
+    port=REDIS_PORT,
+    db=REDIS_DB,
     decode_responses=True,
     max_connections=20,
 )
@@ -15,9 +18,9 @@ redis_pool = ConnectionPool(
 def get_redis_client() -> Redis:
     """Direct Redis connection for workers"""
     return redis.StrictRedis(
-        host=os.getenv("REDIS_HOST", "172.17.9.74"),
-        port=int(os.getenv("REDIS_PORT", 32768)),
-        db=int(os.getenv("REDIS_DB", 2)),
+        host=REDIS_HOST,
+        port=REDIS_PORT,
+        db=REDIS_DB,
         decode_responses=False,
     )
 

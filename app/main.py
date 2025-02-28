@@ -8,7 +8,7 @@ from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from fastapi.responses import HTMLResponse
 
 
-from .core.enums import LLMProvider
+from app.config.enums import LLMProvider
 from .core.logger import logger
 from .core.lifespan import lifespan
 from .core.auth import verify_username, AuthStaticFiles

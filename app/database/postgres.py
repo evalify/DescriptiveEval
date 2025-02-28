@@ -1,13 +1,11 @@
 """Database utilities for handling connections"""
 
-import os
 from contextlib import contextmanager
 import time
 import random
 from typing import Tuple, Optional, Dict
 
 import psycopg2
-from dotenv import load_dotenv
 from psycopg2.extensions import (
     connection as postgres_connection,
     ISOLATION_LEVEL_READ_COMMITTED,
@@ -18,12 +16,12 @@ from psycopg2.errors import ActiveSqlTransaction, QueryCanceledError
 import uuid
 
 from app.core.logger import logger
+from app.config.constants import COCKROACH_DB
 from .database_monitoring import QueryMonitor
 
 # Clean up pools on module unload
 import atexit
 
-load_dotenv()
 
 keepalive_kwargs = {
     "keepalives": 1,
@@ -36,7 +34,7 @@ keepalive_kwargs = {
 postgres_pool = ThreadedConnectionPool(
     5,
     20,
-    os.getenv("COCKROACH_DB"),
+    COCKROACH_DB,
     options="-c statement_timeout=30000",  # 30 second timeout
     **keepalive_kwargs,
 )
@@ -76,7 +74,7 @@ def get_db_cursor():
 def get_postgres_cursor() -> Tuple[RealDictCursor, postgres_connection]:
     """Direct database connection for workers with proper timeouts"""
     my_connection = psycopg2.connect(
-        os.getenv("COCKROACH_DB"),
+        COCKROACH_DB,
         options="-c statement_timeout=30000",  # 30 second timeout
     )
     my_connection.set_session(isolation_level=ISOLATION_LEVEL_READ_COMMITTED)

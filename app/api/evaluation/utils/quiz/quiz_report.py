@@ -33,12 +33,12 @@ markDistribution = {
 
 import asyncio
 import json
-import os
 import uuid
 from typing import Any, Dict, List
 
 from app.core.logger import QuizLogger
 from app.utils.misc import save_quiz_data
+from app.config.constants import MAX_RETRIES
 
 
 async def generate_quiz_report(
@@ -141,9 +141,8 @@ async def save_quiz_report(
     """
     qlogger = QuizLogger(quiz_id)
     retries = 0
-    max_retries = int(os.getenv("DB_MAX_RETRIES", 3))
 
-    while retries < max_retries:
+    while retries < MAX_RETRIES:
         try:
             # Save to database
             qlogger.debug("Attempting to save report to database")
@@ -187,13 +186,13 @@ async def save_quiz_report(
 
         except Exception as e:
             retries += 1
-            if retries == max_retries:
+            if retries == MAX_RETRIES:
                 qlogger.error(
-                    f"Failed to save quiz report after {max_retries} retries: {str(e)}"
+                    f"Failed to save quiz report after {MAX_RETRIES} retries: {str(e)}"
                 )
                 raise
             wait_time = 2**retries  # Exponential backoff: 2,4,8 seconds
             qlogger.warning(
-                f"Retrying database update in {wait_time} seconds... (Attempt {retries}/{max_retries})"
+                f"Retrying database update in {wait_time} seconds... (Attempt {retries}/{MAX_RETRIES})"
             )
             await asyncio.sleep(wait_time)

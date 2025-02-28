@@ -1,10 +1,12 @@
 import json
-import os
 import uuid
+import deprecated
 from app.core.logger import logger
 from fastapi import APIRouter, Depends, HTTPException
 
 from .models import EvalRequest
+from .utils.lock import QuizLock
+
 from app.api.evaluation.service import (
     bulk_evaluate_quiz_responses,
     get_quiz_responses,
@@ -16,11 +18,9 @@ from app.core.exceptions import InvalidQuizIDError
 from app.database.mongo import get_mongo_client
 from app.database.postgres import get_postgres_cursor
 from app.database.redis import get_redis_client
-
-from .utils.lock import QuizLock
 from app.api.evaluation.utils.evaluation_job import evaluation_job
+from app.config.constants import WORKER_TTL
 from app.core.dependencies import get_llm_dependency, get_app
-import deprecated
 
 # Router
 router = APIRouter(prefix="/evaluation", tags=["Evaluation"])
@@ -128,7 +128,7 @@ async def evaluate_bulk_queue(
             request.override_evaluated,
             request.types_to_evaluate,
             request.override_cache,
-            job_timeout=int(os.getenv("WORKER_TTL", "3600")),
+            job_timeout=WORKER_TTL,
         )
         logger.info(
             f"[{trace_id}] Successfully queued evaluation job. Job ID: {job.id}"

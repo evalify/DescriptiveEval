@@ -1,7 +1,7 @@
 """This module contains utility functions for evaluating coding questions"""
 
 import json
-import os
+from app.config.constants import JUDGE_URL
 import re
 from typing import Tuple
 
@@ -9,8 +9,6 @@ import requests
 from dotenv import load_dotenv
 
 load_dotenv()
-
-JUDGE_URL = os.getenv("JUDGE_API")
 
 
 async def evaluate_coding_question(

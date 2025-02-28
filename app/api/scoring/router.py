@@ -8,8 +8,8 @@ from .models import QueryRequest, GuidelinesRequest, QAEnhancementRequest
 from app.core.logger import logger
 from app.core.exceptions import InvalidInputError, EmptyAnswerError
 from app.core.dependencies import get_llm_dependency, get_micro_llm_dependency
+from app.config.constants import MAX_RETRIES
 import uuid
-import os
 
 # Router
 router = APIRouter(prefix="/scoring", tags=["Scoring"])
@@ -55,9 +55,6 @@ async def generate_guidelines_api(
 
     try:
         errors = []
-        MAX_RETRIES = int(
-            os.getenv("MAX_RETRIES", 10)
-        )  # TODO: Move Constants to constant.py
         guidelines_result = {}
         for attempt in range(MAX_RETRIES):
             guidelines_result = await generate_guidelines(

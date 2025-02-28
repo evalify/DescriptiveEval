@@ -11,7 +11,7 @@ sys.path.append(
 )  # Add project root to Python path
 from app.core.logger import logger, QuizLogger
 from app.database.redis import get_redis_client
-
+from app.config.constants import WORKER_TTL
 
 def handle_signal(signum, frame):
     """Handle interrupt signals gracefully"""
@@ -70,7 +70,7 @@ try:
         ["task_queue"],
         connection=redis_conn,
         name=worker_name,
-        worker_ttl=int(os.getenv("WORKER_TTL", 3600)),
+        worker_ttl=WORKER_TTL,
     )
     logger.info(f"Worker {worker_name} successfully created")
 

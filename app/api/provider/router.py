@@ -1,7 +1,7 @@
 from .models import ProviderRequest
 from app.core.logger import logger
 from fastapi import APIRouter, HTTPException, Depends
-from app.core.enums import LLMProvider
+from app.config.enums import LLMProvider
 from app.core.dependencies import get_app
 
 router = APIRouter(prefix="/provider", tags=["Provider"])

@@ -3,7 +3,6 @@ This module contains functions to evaluate quiz responses in bulk using LLMs and
 """
 
 import asyncio
-import os
 import json
 from datetime import datetime, timedelta
 from typing import List, Dict, Optional
@@ -32,12 +31,19 @@ from app.core.exceptions import (
     ResponseQuestionMismatchError,
 )
 from app.core.logger import logger, QuizLogger
-from .utils.misc import save_quiz_data, remove_html_tags
+from app.config.constants import (
+    CACHE_EX,
+    DESC_EVAL_TIME,
+    FITB_EVAL_TIME,
+    EVAL_BATCH_SIZE,
+    BATCH_TIMEOUT,
+    EVAL_MAX_RETRIES,
+)
+from app.utils.misc import save_quiz_data, remove_html_tags
 from .utils.quiz.quiz_report import generate_quiz_report, save_quiz_report
 from .utils.evaltools.evaluator import ResponseEvaluator
 
 load_dotenv()
-CACHE_EX = int(os.getenv("CACHE_EX", 3600))  # Cache expiry time in seconds
 
 
 async def validate_quiz_setup(
@@ -235,15 +241,13 @@ async def bulk_evaluate_quiz_responses(
                 update_progress(
                     redis_client, quiz_id, progress_bar, qlogger, "evaluation_start"
                 )
-                desc_eval_time = float(os.getenv("DESC_EVAL_TIME", 20))  # Worst Case
-                fitb_eval_time = float(os.getenv("FITB_EVAL_TIME", 20))
                 num_desc = question_count_by_type.get("DESCRIPTIVE", 0)
                 num_fitb = question_count_by_type.get("FILL_IN_BLANK", 0)
                 computed_timeout = max(
-                    (num_desc * desc_eval_time) + (num_fitb * fitb_eval_time), 90
+                    (num_desc * DESC_EVAL_TIME) + (num_fitb * FITB_EVAL_TIME), 90
                 )
                 attempt = 0
-                for attempt in range(int(os.getenv("EVAL_MAX_RETRIES", 10))):
+                for attempt in range(EVAL_MAX_RETRIES):
                     try:
 
                         async def eval_with_heartbeat():
@@ -379,10 +383,6 @@ async def bulk_evaluate_quiz_responses(
                 "metadata",
             )
 
-            EVAL_BATCH_SIZE = int(os.getenv("EVAL_BATCH_SIZE", 5))
-            BATCH_TIMEOUT = int(
-                os.getenv("BATCH_TIMEOUT", 300)
-            )  # 5 minutes timeout per batch
             total_responses = len(unevaluated_quiz_responses)
             # processed_results = []
             batch_times = []

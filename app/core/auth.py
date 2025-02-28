@@ -3,11 +3,13 @@ import os
 from typing import Union
 
 from fastapi.security import HTTPBasic
-from fastapi import Request, Depends, HTTPException, status
+from fastapi import Request, HTTPException, status
 from fastapi.staticfiles import StaticFiles
 
+security = HTTPBasic()
 
-async def verify_username(request: Request, security=Depends(HTTPBasic)) -> str:
+
+async def verify_username(request: Request) -> str:
     """Verify username and password from HTTP Basic Auth."""
     credentials = await security(request)
 

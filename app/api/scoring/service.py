@@ -1,6 +1,3 @@
-import os
-
-from dotenv import load_dotenv
 from langchain.output_parsers import ResponseSchema, StructuredOutputParser
 from langchain_core.prompts import PromptTemplate
 from .templates import (
@@ -10,13 +7,9 @@ from .templates import (
     fill_in_the_blank_template,
 )
 from app.core.logger import logger
-from app.core.enums import EvaluationStatus, LLMProvider
+from app.config.enums import EvaluationStatus, LLMProvider
 from app.api.provider.service import get_llm
-
-load_dotenv()
-
-
-MAX_RETRIES = int(os.getenv("MAX_RETRIES", 3))
+from app.config.constants import MAX_RETRIES
 
 
 async def score(

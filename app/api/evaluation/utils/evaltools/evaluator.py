@@ -3,7 +3,6 @@ ResponseEvaluator class to handle evaluation of quiz responses.
 This module contains the core evaluation logic that was previously in evaluation.py.
 """
 
-import os
 import itertools
 import threading
 from datetime import datetime
@@ -31,10 +30,9 @@ from .static_eval import (
     direct_match,
 )
 from app.core.logger import QuizLogger
+from app.config.constants import MAX_RETRIES
 from app.utils.misc import remove_html_tags, save_quiz_data
 from ..quiz.quiz_schema import QuizResponseSchema
-
-MAX_RETRIES = int(os.getenv("MAX_RETRIES", 10))
 
 
 class ResponseEvaluator:
@@ -75,6 +73,8 @@ class ResponseEvaluator:
             self.qlogger.info(
                 "No LLM instance provided. Using default Groq API key rotation"
             )
+            import os
+
             keys = [
                 os.getenv(f"GROQ_API_KEY{i if i > 1 else ''}", None)
                 for i in range(1, 6)
