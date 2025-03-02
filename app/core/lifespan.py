@@ -20,13 +20,14 @@ async def lifespan(app: FastAPI):
     try:
         import pyfiglet
         import termcolor
-        ascii_banner = pyfiglet.figlet_format("Desc Eval", font="slant")
-        colored_ascii_banner = termcolor.colored(ascii_banner, color="cyan")
-        print(colored_ascii_banner)
     except ImportError:
         print("DescEval")
     except Exception as e:
         logger.error(f"Error displaying ASCII banner: {str(e)}")
+    else:
+        ascii_banner = pyfiglet.figlet_format("Desc Eval", font="slant")
+        colored_ascii_banner = termcolor.colored(ascii_banner, color="cyan")
+        print(colored_ascii_banner)
     
     print("Initializing Evaluation Backend for Evalify...")
 
