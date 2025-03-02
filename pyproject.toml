@@ -1,0 +1,31 @@
+[project]
+name = "descriptiveeval"
+version = "0.1.0"
+description = "The Evaluation Backend for Evalify"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "colorlog>=6.9.0",
+    "deprecated>=1.2.18",
+    "fakeredis>=2.27.0",
+    "fastapi>=0.115.11",
+    "langchain>=0.3.19",
+    "langchain-groq>=0.2.4",
+    "langchain-ollama>=0.2.3",
+    "langchain-openai>=0.3.7",
+    "mongomock>=4.3.0",
+    "psutil>=7.0.0",
+    "psycopg2-binary>=2.9.10",
+    "pyfiglet>=1.0.2",
+    "pymongo>=4.11.1",
+    "pytest>=8.3.5",
+    "pytest-asyncio>=0.25.3",
+    "python-dotenv>=1.0.1",
+    "python-json-logger>=3.2.1",
+    "redis>=5.2.1",
+    "requests>=2.32.3",
+    "rq>=2.1.0",
+    "termcolor>=2.5.0",
+    "tqdm>=4.67.1",
+    "uvicorn>=0.34.0",
+]

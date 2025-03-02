@@ -10,13 +10,6 @@ class QueryRequest(BaseModel):
     guidelines: Optional[str] = None
 
 
-class ProviderRequest(BaseModel):
-    provider: str
-    provider_model_name: str = None
-    provider_api_key: str = None
-    service: str = "macro"
-
-
 class GuidelinesRequest(BaseModel):
     question: str = None
     expected_ans: str = None

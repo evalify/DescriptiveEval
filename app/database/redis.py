@@ -1,7 +1,4 @@
-import redis
-from redis import Redis
-import os
-from redis import ConnectionPool
+from redis import Redis, ConnectionPool, StrictRedis
 
 from app.config.constants import REDIS_HOST, REDIS_PORT, REDIS_DB
 
@@ -17,7 +14,7 @@ redis_pool = ConnectionPool(
 
 def get_redis_client() -> Redis:
     """Direct Redis connection for workers"""
-    return redis.StrictRedis(
+    return StrictRedis(
         host=REDIS_HOST,
         port=REDIS_PORT,
         db=REDIS_DB,
