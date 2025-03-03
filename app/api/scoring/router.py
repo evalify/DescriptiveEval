@@ -6,9 +6,10 @@ from .service import (
 )
 from .models import QueryRequest, GuidelinesRequest, QAEnhancementRequest
 from app.core.logger import logger
-from app.core.exceptions import InvalidInputError, EmptyAnswerError
+from app.core.exceptions import InvalidInputError
 from app.core.dependencies import get_llm_dependency, get_micro_llm_dependency
 from app.config.constants import MAX_RETRIES
+from app.config.enums import EvaluationStatus
 import uuid
 
 # Router
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/scoring", tags=["Scoring"])
 
 
 @router.post("/score")
-async def get_response(request: QueryRequest, llm=Depends(get_llm_dependency)):
+async def get_score_response(request: QueryRequest, llm=Depends(get_llm_dependency)):
     trace_id = uuid.uuid4()
     logger.info(
         f"[{trace_id}] Scoring request received for question: {request.question[:100]}..."
@@ -31,14 +32,34 @@ async def get_response(request: QueryRequest, llm=Depends(get_llm_dependency)):
             question=request.question,
             guidelines=request.guidelines,  # Pass guidelines if provided
         )
-        logger.info(f"[{trace_id}] Scoring complete. Score: {result.get('score')}")
-        return result
-    except InvalidInputError as e:
-        logger.error(f"[{trace_id}] Invalid input error: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
-    except EmptyAnswerError as e:
-        logger.error(f"[{trace_id}] Empty answer error: {str(e)}")
-        raise HTTPException(status_code=400, detail=str(e))
+
+        if result["status"] == EvaluationStatus.SUCCESS:
+            logger.info(f"[{trace_id}] Scoring complete. Score: {result.get('score')}")
+            return result
+        else:
+            # Mild errors
+            if result["status"] == EvaluationStatus.EMPTY_ANSWER:
+                logger.warning(
+                    f"[{trace_id}] Empty answer error: {result.get('error')}"
+                )
+            elif result["status"] == EvaluationStatus.INVALID_INPUT:
+                logger.warning(
+                    f"[{trace_id}] Invalid input error: {result.get('error')}"
+                )
+            # Severe errors
+            elif result["status"] == EvaluationStatus.LLM_ERROR:
+                logger.error(
+                    f"[{trace_id}] LLM processing error: {result.get('error')}"
+                )
+            elif result["status"] == EvaluationStatus.PARSE_ERROR:
+                logger.error(
+                    f"[{trace_id}] Response parsing error: {result.get('error')}"
+                )
+            else:
+                logger.error(f"[{trace_id}] Scoring failed: {result.get('error')}")
+            raise HTTPException(
+                status_code=result["status"], detail=result.get("error")
+            )
     except Exception:
         logger.error(f"[{trace_id}] Error processing scoring request", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")

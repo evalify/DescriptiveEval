@@ -1,6 +1,6 @@
 import pytest
 
-from scoring import (
+from app.api.scoring.service import (
     get_llm,
     LLMProvider,
     score,
@@ -8,7 +8,7 @@ from scoring import (
     enhance_question_and_answer,
     score_fill_in_blank,
 )
-from utils.logger import log_evaluation
+from app.core.logger import log_evaluation
 
 
 def print_result(test_name, result):

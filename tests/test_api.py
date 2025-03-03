@@ -1,6 +1,6 @@
 import json
 import pytest
-from utils.logger import log_evaluation
+from app.core.logger import log_evaluation
 from httpx import AsyncClient
 import asyncio
 import time
@@ -17,7 +17,7 @@ def print_api_result(test_name, response):
 @pytest.mark.asyncio
 async def test_switch_to_groq(client):
     response = await client.post(
-        "/set-provider",
+        "/provider/set-provider",
         json={
             "provider": "groq",
             "provider_model_name": "",
@@ -27,13 +27,19 @@ async def test_switch_to_groq(client):
     )
     assert response.status_code == 200
     result = response.json()
+
+
+    get_provider = await client.get("/provider/get-provider")
+    assert get_provider.status_code == 200
+    result = get_provider.json()
+
     assert "Successfully switched to groq provider" in result["message"]
 
 
 @pytest.mark.asyncio
 async def test_switch_to_ollama(client):
     response = await client.post(
-        "/set-provider",
+        "/provider/set-provider",
         json={
             "provider": "ollama",
             "provider_model_name": "",
@@ -48,7 +54,7 @@ async def test_switch_to_ollama(client):
 
 @pytest.mark.asyncio
 async def test_invalid_provider(client):
-    response = await client.post("/set-provider", json={"provider": "invalid"})
+    response = await client.post("/provider/set-provider", json={"provider": "invalid"})
     assert response.status_code == 400
     assert "detail" in response.json()
 
@@ -56,7 +62,7 @@ async def test_invalid_provider(client):
 @pytest.mark.asyncio
 async def test_scoring_endpoint(client, sample_answer):
     response = await client.post(
-        "/score",
+        "/scoring/score",
         json=sample_answer,
         timeout=30.0,  # Increase timeout for LLM operations
     )
@@ -80,7 +86,7 @@ async def test_scoring_endpoint(client, sample_answer):
 @pytest.mark.asyncio
 async def test_scoring_empty_answer(client, sample_answer):
     sample_answer["student_ans"] = ""
-    response = await client.post("/score", json=sample_answer)
+    response = await client.post("/scoring/score", json=sample_answer)
     result = response.json()
     log_evaluation(
         "API Empty Answer",
@@ -96,7 +102,7 @@ async def test_scoring_empty_answer(client, sample_answer):
 @pytest.mark.asyncio
 async def test_scoring_with_question(client, sample_answer):
     sample_answer["question"] = "Explain the process of photosynthesis."
-    response = await client.post("/score", json=sample_answer)
+    response = await client.post("/scoring/score", json=sample_answer)
     print_api_result("Score With Question", response)
     assert response.status_code == 200
 
@@ -111,7 +117,7 @@ async def test_scoring_with_question(client, sample_answer):
 async def test_scoring_without_question(client, sample_answer):
     if "question" in sample_answer:
         del sample_answer["question"]
-    response = await client.post("/score", json=sample_answer)
+    response = await client.post("/scoring/score", json=sample_answer)
     assert response.status_code == 200
 
     result = response.json()
@@ -122,7 +128,7 @@ async def test_scoring_without_question(client, sample_answer):
 @pytest.mark.asyncio
 async def test_scoring_with_guidelines(client, sample_answer):
     sample_answer["guidelines"] = "Focus on technical accuracy and completeness"
-    response = await client.post("/score", json=sample_answer)
+    response = await client.post("/scoring/score", json=sample_answer)
     result = response.json()
     log_evaluation(
         "API Scoring With Guidelines",
@@ -140,7 +146,7 @@ async def test_scoring_with_guidelines(client, sample_answer):
 @pytest.mark.asyncio
 async def test_scoring_with_empty_guidelines(client, sample_answer):
     sample_answer["guidelines"] = ""
-    response = await client.post("/score", json=sample_answer)
+    response = await client.post("/scoring/score", json=sample_answer)
     result = response.json()
     log_evaluation(
         "API Scoring With Empty Guidelines",
@@ -185,14 +191,14 @@ async def test_concurrent_vs_sequential_scoring(client, sample_answer):
     start_time = time.time()
     sequential_responses = []
     for query in queries:
-        response = await client.post("/score", json=query)
+        response = await client.post("/scoring/score", json=query)
         sequential_responses.append(response)
     sequential_time = time.time() - start_time
 
     # Test concurrent execution
     start_time = time.time()
     concurrent_responses = await asyncio.gather(
-        *[client.post("/score", json=query) for query in queries]
+        *[client.post("/scoring/score", json=query) for query in queries]
     )
     concurrent_time = time.time() - start_time
 
@@ -235,7 +241,7 @@ async def test_generate_guidelines_endpoint(client: AsyncClient):
         "expected_ans": "Photosynthesis is the process by which plants convert light energy into chemical energy.",
         "total_score": 10,
     }
-    response = await client.post("/generate-guidelines", json=request_data)
+    response = await client.post("/scoring/generate-guidelines", json=request_data)
     assert response.status_code == 200
     result = response.json()
     assert "guidelines" in result
@@ -248,7 +254,7 @@ async def test_enhance_qa_endpoint(client: AsyncClient):
         "question": "What is photosynthesis?",
         "expected_ans": "Process where plants make food",
     }
-    response = await client.post("/enhance-qa", json=request_data)
+    response = await client.post("/scoring/enhance-qa", json=request_data)
     assert response.status_code == 200
     result = response.json()
     assert "enhanced_question" in result
@@ -269,7 +275,7 @@ async def test_evaluate_endpoint(client: AsyncClient):
             "FILL_IN_BLANK": True,
         },
     }
-    response = await client.post("/evaluate", json=request_data, timeout=30.0)
+    response = await client.post("/evaluation/evaluate", json=request_data, timeout=30.0)
     assert response.status_code in [
         200,
         409,
@@ -283,7 +289,7 @@ async def test_evaluate_endpoint(client: AsyncClient):
 async def test_invalid_quiz_id(client: AsyncClient):
     """Test bulk evaluation with invalid quiz ID"""
     request_data = {"quiz_id": "invalid_quiz_id"}
-    response = await client.post("/evaluate", json=request_data)
+    response = await client.post("/evaluation/evaluate", json=request_data)
     assert response.status_code == 500
     result = response.json()
     assert "detail" in result
@@ -293,7 +299,7 @@ async def test_invalid_quiz_id(client: AsyncClient):
 async def test_empty_quiz(client: AsyncClient):
     """Test bulk evaluation with empty quiz"""
     request_data = {"quiz_id": ""}
-    response = await client.post("/evaluate", json=request_data)
+    response = await client.post("/evaluation/evaluate", json=request_data)
     assert response.status_code == 400
     result = response.json()
     assert "detail" in result
@@ -301,7 +307,7 @@ async def test_empty_quiz(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_score_endpoint(client: AsyncClient):
-    """Test the /score endpoint"""
+    """Test the /scoring/score endpoint"""
     request_data = {
         "question": "Explain photosynthesis.",
         "student_ans": "Plants convert sunlight to energy.",
@@ -309,7 +315,7 @@ async def test_score_endpoint(client: AsyncClient):
         "total_score": 10,
         "guidelines": "Focus on accuracy and completeness.",
     }
-    response = await client.post("/score", json=request_data, timeout=30.0)
+    response = await client.post("/scoring/score", json=request_data, timeout=30.0)
     assert response.status_code == 200
     result = response.json()
     assert "score" in result
@@ -327,9 +333,9 @@ async def test_root_endpoint(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_score_invalid_input(client: AsyncClient):
-    """Test the /score endpoint with invalid input"""
+    """Test the /scoring/score endpoint with invalid input"""
     request_data = {"student_ans": "", "expected_ans": "", "total_score": -1}
-    response = await client.post("/score", json=request_data)
+    response = await client.post("/scoring/score", json=request_data)
     assert response.status_code == 400
     result = response.json()
     assert "detail" in result
@@ -339,7 +345,7 @@ async def test_score_invalid_input(client: AsyncClient):
 async def test_enhance_qa_empty_input(client: AsyncClient):
     """Test the /enhance-qa endpoint with empty input"""
     request_data = {"question": "", "expected_ans": ""}
-    response = await client.post("/enhance-qa", json=request_data)
+    response = await client.post("/scoring/enhance-qa", json=request_data)
     assert response.status_code == 400
     result = response.json()
     assert "detail" in result
@@ -349,7 +355,7 @@ async def test_enhance_qa_empty_input(client: AsyncClient):
 async def test_guidelines_empty_input(client: AsyncClient):
     """Test the /generate-guidelines endpoint with empty input"""
     request_data = {"question": "", "expected_ans": "", "total_score": 10}
-    response = await client.post("/generate-guidelines", json=request_data)
+    response = await client.post("/scoring /generate-guidelines", json=request_data)
     assert response.status_code == 400
     result = response.json()
     assert "detail" in result

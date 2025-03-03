@@ -2,10 +2,10 @@
 
 ## RealTime
 
-- [ ] Modularize Code in app.py, check [link](https://www.perplexity.ai/search/how-to-seperate-fastapi-app-sa-g3nbxnGiSVuFmxorRrnWEA)
+- [x] Modularize Code in app.py, check [link](https://www.perplexity.ai/search/how-to-seperate-fastapi-app-sa-g3nbxnGiSVuFmxorRrnWEA)
 - [ ] Add dynamic batch size for evaluation
-- [ ] Dashboard for monitoring evaluations
-- [ ] Add polling for evaluation status
+- [x] Dashboard for monitoring evaluations
+- [x] Add polling for evaluation status
 - [x] Fix empty response from student is considered critical and kills the evaluation
 
 ## High Priority
@@ -24,7 +24,7 @@
 
 ## Medium Priority
 
-- [ ] Add Get Route for /status retrival
+- [x] Add Get Route for /status retrival
   1. Unevaluated
   2. Pending
   3. Evaluating

@@ -4,21 +4,26 @@ from unittest.mock import MagicMock
 import pytest
 from redis import Redis
 
-from evaluation import (
+from app.api.evaluation.utils.db_api import (
     get_guidelines,
     get_quiz_responses,
     get_all_questions,
-    bulk_evaluate_quiz_responses,
     set_quiz_response,
-    validate_quiz_setup,
 )
-from utils.errors import (
+
+from app.api.evaluation.utils.evaluation_job import bulk_evaluate_quiz_responses
+from app.api.evaluation.service import validate_quiz_setup
+
+from app.core.exceptions import (
     NoQuestionsError,
     NoResponsesError,
     InvalidQuestionError,
     ResponseQuestionMismatchError,
 )
-from utils.quiz.quiz_report import generate_quiz_report, save_quiz_report
+from app.api.evaluation.utils.quiz.quiz_report import (
+    generate_quiz_report,
+    save_quiz_report,
+)
 
 
 @pytest.fixture
@@ -309,7 +314,15 @@ async def test_validate_quiz_setup_response_question_mismatch():
 
 
 @pytest.mark.asyncio
-async def test_mock_quiz_evaluation(redis_mock, pg_cursor_mock, mongo_db_mock, llm, mock_quiz_questions, mock_quiz_responses, mock_quiz_settings):
+async def test_mock_quiz_evaluation(
+    redis_mock,
+    pg_cursor_mock,
+    mongo_db_mock,
+    llm,
+    mock_quiz_questions,
+    mock_quiz_responses,
+    mock_quiz_settings,
+):
     """Test complete quiz evaluation flow with mock data"""
     quiz_id = "test-quiz-123"
     pg_conn_mock = MagicMock()
@@ -321,6 +334,7 @@ async def test_mock_quiz_evaluation(redis_mock, pg_cursor_mock, mongo_db_mock, l
     # Configure evaluation settings mock
     def mock_get_settings(*args):
         return mock_quiz_settings
+
     pg_cursor_mock.fetchone.side_effect = mock_get_settings
 
     # Perform bulk evaluation
@@ -331,7 +345,7 @@ async def test_mock_quiz_evaluation(redis_mock, pg_cursor_mock, mongo_db_mock, l
         mongo_db=mongo_db_mock,
         redis_client=redis_mock,
         llm=llm,
-        save_to_file=True
+        save_to_file=True,
     )
 
     # Verify evaluation results
@@ -342,17 +356,23 @@ async def test_mock_quiz_evaluation(redis_mock, pg_cursor_mock, mongo_db_mock, l
     student1 = next(r for r in results if r["studentId"] == "student1")
     assert student1["responses"]["q1"]["score"] == 1  # Correct MCQ answer
     assert student1["responses"]["q3"]["score"] == 0  # Wrong True/False answer
-    assert student1["responses"]["q3"].get("negative_score", 0) == -0.25  # Negative marking
+    assert (
+        student1["responses"]["q3"].get("negative_score", 0) == -0.25
+    )  # Negative marking
     assert student1["responses"]["q4"]["score"] == 1  # Correct Fill in Blank
     assert student1["responses"]["q5"]["score"] == 5  # Correct coding solution
 
     # Verify second student's results (student2)
     student2 = next(r for r in results if r["studentId"] == "student2")
     assert student2["responses"]["q1"]["score"] == 0  # Wrong MCQ answer
-    assert student2["responses"]["q1"].get("negative_score", 0) == -0.25  # Negative marking
+    assert (
+        student2["responses"]["q1"].get("negative_score", 0) == -0.25
+    )  # Negative marking
     assert student2["responses"]["q3"]["score"] == 1  # Correct True/False answer
     assert student2["responses"]["q4"]["score"] == 0  # Wrong Fill in Blank
-    assert student2["responses"]["q5"]["score"] == 5  # Correct coding solution (alternate implementation)
+    assert (
+        student2["responses"]["q5"]["score"] == 5
+    )  # Correct coding solution (alternate implementation)
 
     # Verify total scores calculation
     for result in results:
@@ -367,16 +387,27 @@ async def test_mock_quiz_evaluation(redis_mock, pg_cursor_mock, mongo_db_mock, l
 async def test_mock_quiz_report(mock_quiz_questions, mock_quiz_responses):
     """Test quiz report generation with mock data"""
     quiz_id = "test-quiz-123"
-    
+
     # Generate report
-    report = await generate_quiz_report(quiz_id, mock_quiz_responses, mock_quiz_questions)
-    
+    report = await generate_quiz_report(
+        quiz_id, mock_quiz_responses, mock_quiz_questions
+    )
+
     # Verify report structure
     assert isinstance(report, dict)
-    assert all(key in report for key in [
-        "quizId", "avgScore", "maxScore", "minScore", "totalScore",
-        "totalStudents", "questionStats", "markDistribution"
-    ])
+    assert all(
+        key in report
+        for key in [
+            "quizId",
+            "avgScore",
+            "maxScore",
+            "minScore",
+            "totalScore",
+            "totalStudents",
+            "questionStats",
+            "markDistribution",
+        ]
+    )
 
     # Verify basic statistics
     assert report["quizId"] == quiz_id
@@ -385,30 +416,45 @@ async def test_mock_quiz_report(mock_quiz_questions, mock_quiz_responses):
 
     # Verify question statistics
     for stat in report["questionStats"]:
-        question = next(q for q in mock_quiz_questions if q["_id"] == stat["questionId"])
+        question = next(
+            q for q in mock_quiz_questions if q["_id"] == stat["questionId"]
+        )
         assert stat["maxMarks"] == question["mark"]
         assert "avgMarks" in stat
         assert "totalAttempts" in stat
-        assert stat["totalAttempts"] == len(mock_quiz_responses)  # All students attempted all questions
+        assert stat["totalAttempts"] == len(
+            mock_quiz_responses
+        )  # All students attempted all questions
 
     # Verify mark distribution
-    assert all(key in report["markDistribution"] for key in ["excellent", "good", "average", "poor"])
+    assert all(
+        key in report["markDistribution"]
+        for key in ["excellent", "good", "average", "poor"]
+    )
     total_students = sum(report["markDistribution"].values())
     assert total_students == len(mock_quiz_responses)
 
     # Test report saving
     pg_cursor_mock = MagicMock()
     pg_conn_mock = MagicMock()
-    
+
     await save_quiz_report(quiz_id, report, pg_cursor_mock, pg_conn_mock)
-    
+
     # Verify database operations
     pg_cursor_mock.execute.assert_called_once()
     pg_conn_mock.commit.assert_called_once()
 
 
 @pytest.mark.asyncio
-async def test_selective_question_evaluation(redis_mock, pg_cursor_mock, mongo_db_mock, llm, mock_quiz_questions, mock_quiz_responses, mock_quiz_settings):
+async def test_selective_question_evaluation(
+    redis_mock,
+    pg_cursor_mock,
+    mongo_db_mock,
+    llm,
+    mock_quiz_questions,
+    mock_quiz_responses,
+    mock_quiz_settings,
+):
     """Test evaluation with selective question types"""
     quiz_id = "test-quiz-123"
     pg_conn_mock = MagicMock()
@@ -424,7 +470,7 @@ async def test_selective_question_evaluation(redis_mock, pg_cursor_mock, mongo_d
         "DESCRIPTIVE": False,
         "CODING": False,
         "TRUE_FALSE": True,
-        "FILL_IN_BLANK": False
+        "FILL_IN_BLANK": False,
     }
 
     results = await bulk_evaluate_quiz_responses(
@@ -435,7 +481,7 @@ async def test_selective_question_evaluation(redis_mock, pg_cursor_mock, mongo_d
         redis_client=redis_mock,
         llm=llm,
         types_to_evaluate=types_to_evaluate,
-        save_to_file=True
+        save_to_file=True,
     )
 
     # Verify only selected question types were evaluated
@@ -452,10 +498,12 @@ async def test_selective_question_evaluation(redis_mock, pg_cursor_mock, mongo_d
 
     # Generate report for selectively evaluated quiz
     report = await generate_quiz_report(quiz_id, results, mock_quiz_questions)
-    
+
     # Verify report reflects selective evaluation
     for stat in report["questionStats"]:
-        question = next(q for q in mock_quiz_questions if q["_id"] == stat["questionId"])
+        question = next(
+            q for q in mock_quiz_questions if q["_id"] == stat["questionId"]
+        )
         if question["type"] in ["MCQ", "TRUE_FALSE"]:
             assert stat["totalAttempts"] > 0
         else:

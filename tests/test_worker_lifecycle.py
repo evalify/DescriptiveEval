@@ -3,8 +3,8 @@ from fastapi.testclient import TestClient
 import psutil
 import time
 from rq import Queue, Worker
-from app import app
-from utils.database import get_redis_client
+from app.main import app
+from app.database.redis import get_redis_client
 
 
 @pytest.fixture

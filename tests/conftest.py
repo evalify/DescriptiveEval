@@ -8,7 +8,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 import pytest
 from httpx import AsyncClient
 import subprocess
-from scoring import get_llm, LLMProvider
+from app.api.scoring.service import get_llm, LLMProvider
 from .fixtures import mock_questions, mock_responses, mock_evaluation_settings
 
 # Create logs directory if it doesn't exist
@@ -61,7 +61,7 @@ def mock_quiz_settings():
 def start_server():
     # Start the FastAPI server
     process = subprocess.Popen(
-        ["python", "-m", "uvicorn", "app:app", "--host", "0.0.0.0", "--port", "4040"]
+        ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "4040"]
     )
     import requests
     import time
