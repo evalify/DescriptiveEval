@@ -28,7 +28,7 @@ async def lifespan(app: FastAPI):
         ascii_banner = pyfiglet.figlet_format("Desc Eval", font="slant")
         colored_ascii_banner = termcolor.colored(ascii_banner, color="cyan")
         print(colored_ascii_banner)
-    
+
     print("Initializing Evaluation Backend for Evalify...")
 
     # Startup: Initialize workers

@@ -16,11 +16,13 @@ def test_client():
 def test_worker_lifecycle_startup(test_client):
     """Test that workers are properly spawned during application startup"""
     # Check if workers are initialized in app state
-    assert hasattr(app.state, 'worker_processes')
+    assert hasattr(app.state, "worker_processes")
     assert len(app.state.worker_processes) > 0
 
     # Verify workers are running
-    running_workers = [p for p in app.state.worker_processes if psutil.pid_exists(p.pid)]
+    running_workers = [
+        p for p in app.state.worker_processes if psutil.pid_exists(p.pid)
+    ]
     assert len(running_workers) == len(app.state.worker_processes)
 
     # Check Redis registration
@@ -35,71 +37,86 @@ def test_worker_status_endpoint(test_client):
     assert response.status_code == 200
 
     data = response.json()
-    assert 'workers' in data
-    assert 'active_workers' in data
-    assert 'total_workers' in data
-    assert 'queue_info' in data
-    assert 'jobs_summary' in data
+    assert "workers" in data
+    assert "active_workers" in data
+    assert "total_workers" in data
+    assert "queue_info" in data
+    assert "jobs_summary" in data
 
     # Verify worker information
-    for worker in data['workers']:
-        assert 'worker_id' in worker
-        assert 'status' in worker
-        assert 'pid' in worker
-        if worker['status'] == 'running':
-            assert 'current' in worker
-            assert 'cpu_percent' in worker['current']
-            assert 'memory_percent' in worker['current']
+    for worker in data["workers"]:
+        assert "worker_id" in worker
+        assert "status" in worker
+        assert "pid" in worker
+        if worker["status"] == "running":
+            assert "current" in worker
+            assert "cpu_percent" in worker["current"]
+            assert "memory_percent" in worker["current"]
 
 
 def test_kill_and_replace_worker(test_client):
     """Test killing a worker and optionally replacing it"""
     # Get initial worker status
     initial_status = test_client.get("/workers/status").json()
-    initial_worker = next((w for w in initial_status['workers'] if w['status'] == 'running'), None)
+    initial_worker = next(
+        (w for w in initial_status["workers"] if w["status"] == "running"), None
+    )
     assert initial_worker is not None
 
     # Kill worker without replacement
-    response = test_client.post(f"/workers/kill/{initial_worker['pid']}?spawn_replacement=false")
+    response = test_client.post(
+        f"/workers/kill/{initial_worker['pid']}?spawn_replacement=false"
+    )
     assert response.status_code == 200
     # Wait for worker to terminate
     start_time = time.time()
     while time.time() - start_time < 10:  # Timeout after 10 seconds
         after_kill = test_client.get("/workers/status").json()
-        if len([w for w in after_kill['workers'] if w['status'] == 'running']) < len(initial_status['workers']):
+        if len([w for w in after_kill["workers"] if w["status"] == "running"]) < len(
+            initial_status["workers"]
+        ):
             break
         time.sleep(0.5)
     else:
         raise TimeoutError("Worker did not terminate in time")
 
     # Kill worker with replacement
-    running_worker = next((w for w in after_kill['workers'] if w['status'] == 'running'), None)
+    running_worker = next(
+        (w for w in after_kill["workers"] if w["status"] == "running"), None
+    )
     assert running_worker is not None
 
-    response = test_client.post(f"/workers/kill/{running_worker['pid']}?spawn_replacement=true")
+    response = test_client.post(
+        f"/workers/kill/{running_worker['pid']}?spawn_replacement=true"
+    )
     assert response.status_code == 200
-    assert 'replacement_worker' in response.json()
+    assert "replacement_worker" in response.json()
     # Wait for new worker to start
     start_time = time.time()
     while time.time() - start_time < 10:  # Timeout after 10 seconds
         final_status = test_client.get("/workers/status").json()
-        if len([w for w in final_status['workers'] if w['status'] == 'running']) == len(after_kill['workers']):
+        if len([w for w in final_status["workers"] if w["status"] == "running"]) == len(
+            after_kill["workers"]
+        ):
             break
         time.sleep(0.5)
     else:
         raise TimeoutError("Replacement worker did not start in time")
 
     print(final_status)
-    assert len([w for w in final_status['workers'] if w['status'] == 'running']) == len(after_kill['workers']), \
-        f"Worker count not maintained after replacement ({len(final_status['workers'])} workers running)" + \
-        f"Expected {len(initial_status['workers'])} workers"
+    assert len([w for w in final_status["workers"] if w["status"] == "running"]) == len(
+        after_kill["workers"]
+    ), (
+        f"Worker count not maintained after replacement ({len(final_status['workers'])} workers running)"
+        + f"Expected {len(initial_status['workers'])} workers"
+    )
 
 
 def test_worker_job_assignment(test_client):
     """Test that jobs are properly assigned to workers"""
     # Create a test job
     redis_conn = get_redis_client()
-    queue = Queue('task_queue', connection=redis_conn)
+    queue = Queue("task_queue", connection=redis_conn)
 
     # Add a test job
     job = queue.enqueue(lambda x: x + 1, args=(1,), job_timeout=10)
@@ -111,14 +128,17 @@ def test_worker_job_assignment(test_client):
     data = response.json()
 
     # Verify job appears in queue info
-    assert 'queue_info' in data
-    jobs_info = data['queue_info']
-    assert any(j['job_id'] == job.id for j in jobs_info['queued'] + jobs_info.get('completed', []))
+    assert "queue_info" in data
+    jobs_info = data["queue_info"]
+    assert any(
+        j["job_id"] == job.id
+        for j in jobs_info["queued"] + jobs_info.get("completed", [])
+    )
 
     # Verify job is assigned to a worker
-    workers_with_jobs = [w for w in data['workers'] if w.get('current_job')]
+    workers_with_jobs = [w for w in data["workers"] if w.get("current_job")]
     if job.is_finished:
-        assert any(w['current_job']['job_id'] == job.id for w in workers_with_jobs)
+        assert any(w["current_job"]["job_id"] == job.id for w in workers_with_jobs)
 
 
 @pytest.mark.asyncio
@@ -138,4 +158,6 @@ async def test_application_shutdown():
     # Verify Redis cleanup
     redis_conn = get_redis_client()
     remaining_workers = Worker.all(connection=redis_conn)
-    assert not any(str(pid) in w.name for w in remaining_workers for pid in initial_pids)
+    assert not any(
+        str(pid) in w.name for w in remaining_workers for pid in initial_pids
+    )

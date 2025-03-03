@@ -61,7 +61,16 @@ def mock_quiz_settings():
 def start_server():
     # Start the FastAPI server
     process = subprocess.Popen(
-        ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "4040"]
+        [
+            "python",
+            "-m",
+            "uvicorn",
+            "app.main:app",
+            "--host",
+            "0.0.0.0",
+            "--port",
+            "4040",
+        ]
     )
     import requests
     import time

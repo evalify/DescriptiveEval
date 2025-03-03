@@ -28,7 +28,6 @@ async def test_switch_to_groq(client):
     assert response.status_code == 200
     result = response.json()
 
-
     get_provider = await client.get("/provider/get-provider")
     assert get_provider.status_code == 200
     result = get_provider.json()
@@ -275,7 +274,9 @@ async def test_evaluate_endpoint(client: AsyncClient):
             "FILL_IN_BLANK": True,
         },
     }
-    response = await client.post("/evaluation/evaluate", json=request_data, timeout=30.0)
+    response = await client.post(
+        "/evaluation/evaluate", json=request_data, timeout=30.0
+    )
     assert response.status_code in [
         200,
         409,

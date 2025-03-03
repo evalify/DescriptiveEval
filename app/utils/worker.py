@@ -13,6 +13,7 @@ from app.core.logger import logger, QuizLogger
 from app.database.redis import get_redis_client
 from app.config.constants import WORKER_TTL
 
+
 def handle_signal(signum, frame):
     """Handle interrupt signals gracefully"""
     logger.warning(f"Worker received signal {signum}. Initiating graceful shutdown...")

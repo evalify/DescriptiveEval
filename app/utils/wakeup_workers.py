@@ -13,6 +13,7 @@ from rq import Worker
 from app.database.redis import get_redis_client
 from app.core.logger import logger
 from app.config.constants import WORKER_COUNT
+
 _worker_stats = {}
 
 
