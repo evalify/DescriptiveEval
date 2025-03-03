@@ -8,6 +8,9 @@ from pathlib import Path
 import socket
 import os
 from pythonjsonlogger import json as jsonlogger
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # Create logs directory if it doesn't exist
 log_dir = Path("logs")
@@ -39,7 +42,11 @@ logging.setLogRecordFactory(create_record_factory(logging.getLogRecordFactory())
 
 # Create logger
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG if os.getenv("DEBUG") else logging.INFO)
+
+log_level = os.getenv("LOG_LEVEL", "INFO").upper()
+level = getattr(logging, log_level, logging.INFO)
+logger.setLevel(level)
+print(f"Log level set to {log_level}")
 logger.propagate = False  # Prevent propagation to avoid duplicate logs
 
 # Remove any existing handlers

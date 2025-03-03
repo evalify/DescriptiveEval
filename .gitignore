@@ -1,7 +1,24 @@
-.*
-!.gitignore
-!.pre-commit-config.yaml
+# Environment
+.env
+
+# Editor Files
+.idea
+.vscode
+.github/prompts
+
+# Cache
+.pytest_cache
+.ruff_cache
 __pycache__
+
+# Virtual Environments
+.venv
+virt
+venv
+
+# Generated Files
 logs/
 data/
+
+# Misc
 archive/

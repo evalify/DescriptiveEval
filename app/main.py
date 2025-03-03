@@ -1,12 +1,11 @@
 import time
 
 
-from fastapi import FastAPI, Depends, Request
+from fastapi import FastAPI, Depends, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
-from fastapi.responses import HTMLResponse
-
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from app.config.enums import LLMProvider
 from .core.logger import logger
@@ -18,6 +17,9 @@ from .api.provider.router import router as provider_router
 from .api.scoring.router import router as scoring_router
 from .api.workers.router import router as workers_router
 
+# FIXME: Temporary models import for redirects
+from .api.evaluation.models import EvalRequest
+from .api.scoring.models import QueryRequest, QAEnhancementRequest, GuidelinesRequest
 
 # Initialize FastAPI with lifespan manager
 logger.info("Initializing FastAPI application")
@@ -67,12 +69,23 @@ async def log_requests(request: Request, call_next):
     start_time = time.time()
     response = await call_next(request)
     duration = time.time() - start_time
-    logger.info(
-        f"Path: {request.url.path} | "
-        f"Method: {request.method} | "
-        f"Status: {response.status_code} | "
-        f"Duration: {duration:.3f}s"
-    )
+
+    if request.url.path.startswith("/workers/status") or request.url.path.startswith(
+        "/evaluate/status"
+    ):
+        logger.debug(
+            f"Path: {request.url.path} | "
+            f"Method: {request.method} | "
+            f"Status: {response.status_code} | "
+            f"Duration: {duration:.3f}s"
+        )
+    else:
+        logger.info(
+            f"Path: {request.url.path} | "
+            f"Method: {request.method} | "
+            f"Status: {response.status_code} | "
+            f"Duration: {duration:.3f}s"
+        )
     return response
 
 
@@ -91,7 +104,36 @@ async def get_redoc(username: str = Depends(verify_username)) -> HTMLResponse:
     return get_redoc_html(openapi_url="/api/openapi.json", title="redoc")
 
 
+# FIXME: Remove this: Redirects for backwards compatibility
+@app.post("/evaluate")
+async def redirect_evaluate(eval_request: EvalRequest):
+    return RedirectResponse(
+        "/evaluation/evaluate", status_code=status.HTTP_307_TEMPORARY_REDIRECT
+    )
+
+
+@app.post("/generate-guidelines")
+async def redirect_evaluation(guidelines_request: GuidelinesRequest):
+    return RedirectResponse(
+        "/scoring/generate-guidelines", status_code=status.HTTP_307_TEMPORARY_REDIRECT
+    )
+
+
+@app.post("/enhance-qa")
+async def redirect_enhance_qa(qa_enhancement_request: QAEnhancementRequest):
+    return RedirectResponse(
+        "/scoring/enhance-qa", status_code=status.HTTP_307_TEMPORARY_REDIRECT
+    )
+
+
+@app.post("/score")
+async def redirect_score(query_request: QueryRequest):
+    return RedirectResponse(
+        "/scoring/score", status_code=status.HTTP_307_TEMPORARY_REDIRECT
+    )
+
+
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=4040)
+    uvicorn.run(app, host="0.0.0.0", port=4040, log_level="error")

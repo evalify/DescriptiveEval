@@ -1,37 +1,30 @@
-# Descriptive Evaluation Using LLMs
+# DescEval
 
-This repository demonstrates how to evaluate descriptive answers using large language models (LLMs). It contains:
+## Description
 
-- A set of database integration files (CockroachDB and MongoDB).
-- A FastAPI server exposing a simple scoring endpoint for descriptive answers.
-- Example tests showcasing various LLM providers and test scenarios.
+DescEval is a FastAPI application and acts as the Evaluation backend for Evalify.
 
-## Features
+## Installation
 
-- Flexible LLM provider switching between Ollama and Groq.
-- Rubric generation and score breakdown for each evaluated response.
-- Async-based FastAPI endpoints for generating guidelines and scoring answers.
+1. Clone the repository:
+    - git clone
+2. Install uv for easy package management:
+    - pip install uv
+3. Create a virtual environment:
+    - uv venv
+4. Install the required packages:
+    - uv sync --reinstall
 
-## Prerequisites
+Optional: Setup ruff pre-commit hook for linting:
 
-- Python 3.9+
-- Install dependencies:
-    - pip install -r requirements.txt
-- Environment variables for CockroachDB, MongoDB, and any required LLM API keys.
+- pre-commit install
 
 ## Usage
 
 1. Start the FastAPI server:
-    - python app.py
-2. Send requests to the endpoints (/score, /generate-guidelines, etc.).
-3. To update the LLM provider, use the "/set-provider" POST endpoint.
+    - python -m app.main
 
 ## Testing
 
-- Run tests with pytest (including async tests):
+Run tests with pytest (including async tests):
     - pytest
-
-## Notes
-
-- This project is in WIP status and may contain bugs.
-- The evaluation focuses on content relevance and correctness, ignoring user attempts to bypass guidelines.
