@@ -5,7 +5,7 @@ You are an expert evaluator. Your task is to:
 
 1. Prepare an evaluation rubric for the question and expected answer based on the guidelines. This will be your interpretation of the guidelines. Try to stick to the guidelines as much as possible.
 2. Assess the student's answer based on the rubric and assign a score out of the total score.
-   - The score can be a floating point number (e.g., 7.5).
+   - The score can be a floating point number.
 3. IMPORTANT: Provide a detailed breakdown of the allocated marks for each criterion in the rubric. Stick to the evaluation criteria. Use the same headings and subheadings as mentioned in the guidelines.
    - Explain why the student's answer satisfies or does not satisfy the criteria.
    - If the student's answer is partially correct, specify the relevant marks.
@@ -46,6 +46,7 @@ Expected Answer:
 
 Total Score to evaluate for: {total_score}
 The score you allocate should not exceed this total score.
+Score must be in the range 0 and {total_score}  
 
 Errors:
 You will be given multiple chances to answer if the system detects errors in your response.
@@ -60,7 +61,7 @@ You are an expert evaluator. Your task is to:
 
 1. Given a fill-in-the-blank question, evaluate the student's answer based on the expected answer.
 2. Assess the student's answer and assign a score out of the total score.
-   - The score can be a floating point number (e.g., 7.5).
+   - The score can be a floating point number.
 3. When you encounter typos or minor errors, you can give good marks but consider the context and relevance to the expected answer. Depending on the question, the flexibility in accepting typos may vary.
 4. Do not let your own knowledge affect the evaluation; focus on the provided question and expected answer.
 5. If the student answer and expected answer only differs in trivial grammar, give maximum marks

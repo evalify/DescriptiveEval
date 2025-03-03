@@ -39,6 +39,7 @@ from typing import Any, Dict, List
 from app.core.logger import QuizLogger
 from app.utils.misc import save_quiz_data
 from app.config.constants import MAX_RETRIES
+from app.core.exceptions import EvaluationError
 
 
 async def generate_quiz_report(
@@ -79,12 +80,15 @@ async def generate_quiz_report(
     question_stats = []
     for question in questions:
         question_id = question["_id"]
-        correct = sum(
-            1
-            for result in quiz_results
-            if float(result["responses"].get(question_id, {}).get("score", 0))
-            >= 0.6 * float(question["mark"])
-        )
+        try:
+            correct = sum(
+                1
+                for result in quiz_results
+                if float(result["responses"].get(question_id, {}).get("score", 0))
+                >= 0.6 * float(question["mark"])
+            )
+        except Exception as e:
+            raise EvaluationError(f"Error during: {str(e)}")  # TODO: Implement Error
         incorrect = len(quiz_results) - correct
         total_marks_obtained = sum(
             result["responses"].get(question_id, {}).get("score", 0)

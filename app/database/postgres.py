@@ -53,11 +53,14 @@ def exponential_backoff(attempt, max_attempts=5, base_delay=0.1):
 @contextmanager
 def get_db_connection():
     """Get a connection from the pool and return it when done"""
-    conn = postgres_pool.getconn()
+    conn = psycopg2.connect(  # FIXME: Temporary override of pool
+        COCKROACH_DB,
+        options="-c statement_timeout=30000",  # 30 second timeout
+    )
     try:
         yield conn
     finally:
-        postgres_pool.putconn(conn)
+        conn.close()
 
 
 @contextmanager

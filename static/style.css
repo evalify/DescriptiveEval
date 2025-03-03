@@ -747,3 +747,23 @@ body, .card, .navbar, .modal-content, .form-control, .btn {
     border-radius: 0.5rem;
     border: 1px solid var(--border-color);
 }
+
+.card-title {
+    font-size: 2rem;
+    margin-bottom: 0.5rem;
+}
+
+/* Center the card title value */
+.card-title {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+}
+
+.card.text-center .card-title {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+}
