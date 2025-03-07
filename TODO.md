@@ -7,6 +7,7 @@
 - [ ] Add dynamic batch size for evaluation
 - [ ] Persist completed jobs in 4040 dashboard
 - [ ] Add more info for failed jobs
+- [ ] Add retry failed jobs in 4040 dashboard
 
 ## High Priority
 

@@ -210,7 +210,10 @@ async def bulk_evaluate_quiz_responses(
 
         async def save_response(evaluated_result):
             """Save a single response with its own database connection"""
-            async with get_db_connection() as (cursor, conn):
+            async with get_db_connection() as (
+                cursor,
+                conn,
+            ):  # FIXME: Use me or Remove me
                 await set_quiz_response(cursor, conn, evaluated_result)
 
         async def process_response(
@@ -333,6 +336,9 @@ async def bulk_evaluate_quiz_responses(
                 logger.error(
                     f"Error processing response {index}: {str(e)}", exc_info=True
                 )
+                raise Exception(
+                    f"Error processing response (unable to evaluate/save) {index}: {str(e)}"
+                )
                 # total_time = time.monotonic() - start_time
                 # qlogger.error(
                 #     f"Error processing response {index} after {timedelta(seconds=total_time):.2f}. "
@@ -454,7 +460,7 @@ async def bulk_evaluate_quiz_responses(
 
                 except asyncio.TimeoutError:
                     qlogger.error(
-                        f"Batch {batch_number} timed out after {BATCH_TIMEOUT} seconds"
+                        f"FAILED: Batch {batch_number} timed out after {BATCH_TIMEOUT} seconds"
                     )
                     # Don't raise here, continue with next batch
                 except Exception as e:

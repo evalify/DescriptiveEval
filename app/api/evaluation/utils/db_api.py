@@ -15,6 +15,7 @@ from app.api.scoring.service import generate_guidelines
 from app.core.logger import logger
 from app.utils.misc import DateTimeEncoder, save_quiz_data
 from app.config.constants import CACHE_EX, MAX_RETRIES, DB_MAX_RETRIES
+from app.database.postgres import get_db_connection_no_context
 
 load_dotenv()
 
@@ -168,8 +169,17 @@ async def set_quiz_response(cursor, conn, response: dict):
     retries = 0
     max_retries = DB_MAX_RETRIES
 
+    new_cursor = False
     while retries < max_retries:
         try:
+            if retries == max_retries - 1:
+                # At last retry, get a new connection
+                logger.warning(
+                    f"Retrying to get a new connection for response {response['id']} (attempt {retries + 1})"
+                )
+                cursor, conn = get_db_connection_no_context()
+                new_cursor = True
+
             # Set statement timeout at session level
             cursor.execute("SET LOCAL statement_timeout = %s", (timeout * 1000,))
 
@@ -191,6 +201,12 @@ async def set_quiz_response(cursor, conn, response: dict):
                 conn.commit()
 
             logger.info(f"Successfully updated response {response['id']}")
+
+            if new_cursor:
+                # Close the new cursor if it was created
+                cursor.close()
+                conn.close()
+
             return
 
         except (asyncio.TimeoutError, QueryCanceledError):
@@ -199,14 +215,22 @@ async def set_quiz_response(cursor, conn, response: dict):
                 f"Operation timed out/cancelled for response {response['id']} (attempt {retries}/{max_retries})"
             )
             if retries == max_retries:
+                logger.error(
+                    f"Max retries reached for updating response {response['id']}"
+                )
                 raise
             wait_time = 2**retries
             await asyncio.sleep(wait_time)
 
         except Exception as e:
             retries += 1
-            logger.error(f"Error updating response {response['id']}: {str(e)}")
+            logger.error(
+                f"Error updating response {response['id']}: {str(e)} - retry {retries}/{max_retries}"
+            )
             if retries == max_retries:
+                logger.error(
+                    f"Max retries reached for updating response {response['id']}"
+                )
                 raise
             wait_time = 2**retries
             await asyncio.sleep(wait_time)

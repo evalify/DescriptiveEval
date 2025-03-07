@@ -63,6 +63,19 @@ def get_db_connection():
         conn.close()
 
 
+def get_db_connection_no_context():
+    """Get a connection without context manager"""
+    conn = psycopg2.connect(
+        COCKROACH_DB,
+        options="-c statement_timeout=30000",  # 30 second timeout
+    )
+    conn.autocommit = True  # Set autocommit mode
+    # Get cursor
+    cursor = conn.cursor(cursor_factory=RealDictCursor)
+
+    return conn, cursor
+
+
 @contextmanager
 def get_db_cursor():
     """Get a connection and cursor from the pool and return them when done"""
