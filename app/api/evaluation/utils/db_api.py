@@ -4,6 +4,7 @@ This module provides abstract functions for interacting with CockroachDB/Mongo/R
 
 import asyncio
 import json
+import time
 from typing import Dict, Any, Optional
 import psycopg2
 from psycopg2.errors import QueryCanceledError
@@ -143,7 +144,9 @@ def get_quiz_responses(
     )
 
     if save_to_file:
-        save_quiz_data(quiz_responses, quiz_id, "responses")
+        save_quiz_data(
+            quiz_responses, quiz_id, f"responses_{time.strftime('%Y%m%d_%H%M%S')}"
+        )
     return quiz_responses
 
 
@@ -269,7 +272,9 @@ def get_all_questions(
         question["_id"] = str(question["_id"])
 
     if save_to_file:
-        save_quiz_data(questions, quiz_id, "questions")
+        save_quiz_data(
+            questions, quiz_id, f"questions_{time.strftime('%Y%m%d_%H%M%S')}"
+        )
 
     redis_client.set(
         f"questions:{quiz_id}_questions_evalcache",

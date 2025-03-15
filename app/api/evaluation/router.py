@@ -4,7 +4,7 @@ import deprecated
 from app.core.logger import logger
 from fastapi import APIRouter, Depends, HTTPException
 
-from .models import EvalRequest
+from .models import EvalRequest, ReEvalRequest
 from .utils.lock import QuizLock
 
 from app.api.evaluation.service import (
@@ -139,6 +139,61 @@ async def evaluate_bulk_queue(
         raise HTTPException(status_code=e.status_code, detail=e.detail)
     except Exception:
         logger.error(f"[{trace_id}] Failed to queue evaluation", exc_info=True)
+        raise HTTPException(status_code=500, detail="Internal server error")
+
+
+@router.post("/reevaluate")
+async def reevaluate_bulk_queue(
+    request: ReEvalRequest,
+    app=Depends(get_app),
+):
+    trace_id = uuid.uuid4()
+    logger.info(f"[{trace_id}] Queueing reevaluation for quiz_id: {request.quiz_id}")
+
+    try:
+        # Get database connections
+        postgres_cursor, postgres_conn = get_postgres_cursor()
+
+        try:
+            # Reset evaluation status for specified student IDs
+            placeholders = ",".join(["%s"] * len(request.student_ids))
+            update_query = f"""
+            UPDATE "QuizResult"
+            SET "isEvaluated" = 'UNEVALUATED'
+            WHERE "quizId" = %s AND "studentId" IN ({placeholders})
+            """
+            params = [request.quiz_id] + request.student_ids
+            postgres_cursor.execute(update_query, params)
+            updated_rows = postgres_cursor.rowcount
+            postgres_conn.commit()
+
+            logger.info(
+                f"[{trace_id}] Reset evaluation status for {updated_rows} quiz results for quiz_id: {request.quiz_id}"
+            )
+
+            # Now queue the evaluation job using the same request parameters
+            evaluate_request = EvalRequest(
+                quiz_id=request.quiz_id,
+                override_evaluated=request.override_evaluated,
+                override_locked=request.override_locked,
+                override_cache=request.override_cache,
+                types_to_evaluate=request.types_to_evaluate,
+            )
+
+            # Forward to the evaluate endpoint
+            return await evaluate_bulk_queue(evaluate_request, app=app)
+
+        except Exception:
+            logger.error(f"[{trace_id}] Failed to reevaluate quiz", exc_info=True)
+            postgres_conn.rollback()
+            raise HTTPException(status_code=500, detail="Failed to reevaluate quiz")
+
+        finally:
+            postgres_cursor.close()
+            postgres_conn.close()
+
+    except Exception:
+        logger.error(f"[{trace_id}] Error setting up reevaluation", exc_info=True)
         raise HTTPException(status_code=500, detail="Internal server error")
 
 

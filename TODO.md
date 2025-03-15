@@ -8,6 +8,8 @@
 - [ ] Persist completed jobs in 4040 dashboard
 - [ ] Add more info for failed jobs
 - [ ] Add retry failed jobs in 4040 dashboard
+- [ ] Token Metrics for LLMs
+- [ ] Killed jobs should be in canceled, not failed
 
 ## High Priority
 

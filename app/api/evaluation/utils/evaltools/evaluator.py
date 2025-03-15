@@ -48,6 +48,10 @@ class ResponseEvaluator:
         self.questions = {
             str(q["_id"]): q for q in questions
         }  # Convert to dict for O(1) lookup
+        self.total_marks = sum(
+            question.get("marks", question["mark"]) for question in questions
+        )  # Questions are already validated before call in validate_quiz_setup
+
         self.evaluation_settings = evaluation_settings or {}
         self.llm = llm
         self.qlogger = QuizLogger(quiz_id)
@@ -230,7 +234,8 @@ class ResponseEvaluator:
         self.qlogger.info(
             f"Evaluating response {quiz_result['id']} for student {quiz_result['studentId']}"
         )
-        quiz_result["totalScore"] = 0
+        quiz_result["totalScore"] = self.total_marks
+        quiz_result["score"] = 0
 
         for qid, question in self.questions.items():
             # Handle old schema conversion
@@ -246,7 +251,6 @@ class ResponseEvaluator:
                 if question.get("marks") is not None:
                     question["mark"] = question["marks"]
                 question_total_score = question["mark"]
-                quiz_result["totalScore"] += question_total_score
             except KeyError:
                 raise InvalidQuestionError(
                     f"Question {qid} is missing required 'mark'/'marks' attribute"

@@ -36,13 +36,13 @@ app = FastAPI(
 # Store current provider in app state
 app.state.current_provider = LLMProvider.VLLM
 app.state.current_model_name = (
-    "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"  # "deepseek-r1:70b"
+    "deepseek-ai/DeepSeek-R1-Distill-Llama-70B"  # "deepseek-r1:70b"
 )
 app.state.current_api_key = None
 
 app.state.current_micro_llm_provider = LLMProvider.VLLM  # LLMProvider.GROQ
 app.state.current_micro_llm_model_name = (
-    "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"  # "llama-3.3-70b-specdec"
+    "deepseek-ai/DeepSeek-R1-Distill-Llama-70B"  # "llama-3.3-70b-specdec"
 )
 app.state.current_micro_llm_api_key = None  # os.getenv("GROQ_API_KEY")
 
