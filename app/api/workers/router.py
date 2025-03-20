@@ -6,6 +6,7 @@ from app.api.evaluation.utils.lock import QuizLock
 from app.database.redis import get_redis_client
 from app.utils.wakeup_workers import spawn_workers, check_workers
 from app.core.dependencies import get_app
+from .service import get_queue_info
 import psutil
 import uuid
 
@@ -26,76 +27,13 @@ async def get_workers_status(app=Depends(get_app)):
 
         # Get queue information
         redis_conn = get_redis_client()
-        queue = Queue("task_queue", connection=redis_conn)
-
-        queued_jobs = failed_jobs = completed_jobs = ()
+        queue = Queue(
+            "task_queue", connection=redis_conn
+        )  # TODO: Use queue from state?
 
         try:
-            # Get jobs from different states with error handling
-            queued_jobs = queue.get_jobs() or []
-            failed_registry = queue.failed_job_registry
-            completed_registry = queue.finished_job_registry
-
-            failed_jobs = failed_registry.get_job_ids() if failed_registry else []
-            completed_jobs = (
-                completed_registry.get_job_ids() if completed_registry else []
-            )
-
             # Process job information with error handling
-            queue_info = {
-                "queued": [
-                    {
-                        "job_id": job.id,
-                        "quiz_id": job.args[0] if job.args else None,
-                        "enqueued_at": job.enqueued_at.isoformat()
-                        if job.enqueued_at
-                        else None,
-                        "status": job.get_status(),
-                        "worker_pid": job.worker_name.split(".")[1]
-                        if job.worker_name
-                        else None,
-                    }
-                    for job in queued_jobs
-                    if job
-                ],
-                "failed": [
-                    {
-                        "job_id": job_id,
-                        "quiz_id": queue.fetch_job(job_id).args[0]
-                        if queue.fetch_job(job_id) and queue.fetch_job(job_id).args
-                        else None,
-                        "failed_at": queue.fetch_job(job_id).ended_at.isoformat()
-                        if queue.fetch_job(job_id) and queue.fetch_job(job_id).ended_at
-                        else None,
-                        "error_message": queue.fetch_job(job_id).exc_info
-                        if queue.fetch_job(job_id)
-                        else None,
-                    }
-                    for job_id in failed_jobs
-                    if job_id
-                ],
-                "completed": [
-                    {
-                        "job_id": job_id,
-                        "quiz_id": queue.fetch_job(job_id).args[0]
-                        if queue.fetch_job(job_id) and queue.fetch_job(job_id).args
-                        else None,
-                        "completed_at": queue.fetch_job(job_id).ended_at.isoformat()
-                        if queue.fetch_job(job_id) and queue.fetch_job(job_id).ended_at
-                        else None,
-                        "duration": (
-                            queue.fetch_job(job_id).ended_at
-                            - queue.fetch_job(job_id).started_at
-                        ).total_seconds()
-                        if queue.fetch_job(job_id)
-                        and queue.fetch_job(job_id).ended_at
-                        and queue.fetch_job(job_id).started_at
-                        else None,
-                    }
-                    for job_id in completed_jobs
-                    if job_id
-                ],
-            }
+            queue_info = get_queue_info(queue)
         except Exception as e:
             logger.error(
                 f"[{trace_id}] Error processing queue information: {str(e)}",
@@ -109,9 +47,9 @@ async def get_workers_status(app=Depends(get_app)):
             "total_workers": len(app.state.worker_processes),
             "queue_info": queue_info,
             "jobs_summary": {
-                "queued": len(queued_jobs),
-                "failed": len(failed_jobs),
-                "completed": len(completed_jobs),
+                "queued": queue_info["total"]["queued"],
+                "failed": queue_info["total"]["failed"],
+                "completed": queue_info["total"]["completed"],
             },
         }
 

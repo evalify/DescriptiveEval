@@ -21,6 +21,9 @@ from app.database.redis import get_redis_client
 from app.api.evaluation.utils.evaluation_job import evaluation_job
 from app.config.constants import WORKER_TTL
 from app.core.dependencies import get_llm_dependency, get_app
+from app.api.workers.service import get_quiz_status_from_queue
+from app.api.evaluation.utils.db_api import get_quiz_isevaluated
+from app.utils.wakeup_workers import get_running_quiz_ids
 
 # Router
 router = APIRouter(prefix="/evaluation", tags=["Evaluation"])
@@ -55,7 +58,9 @@ async def evaluate_bulk(request: EvalRequest, llm=Depends(get_llm_dependency)):
 
 
 @router.get("/status/{quiz_id}")
-async def get_evaluation_status(quiz_id: str, redis_client=Depends(get_redis_client)):
+async def get_evaluation_status(
+    quiz_id: str, redis_client=Depends(get_redis_client), app=Depends(get_app)
+):
     """
     Retrieve the evaluation progress status for a given quiz.
 
@@ -65,9 +70,48 @@ async def get_evaluation_status(quiz_id: str, redis_client=Depends(get_redis_cli
 
     Returns:
         dict: A dictionary containing the quiz_id and either the progress details or a message.
-    """
-    progress = redis_client.get(f"quiz_progress:{quiz_id}")
 
+    Status Codes:
+        200: Evaluation in progress, returns progress details.
+        303: No evaluation is running for the quiz.
+        500: Error decoding progress data.
+    """
+    logger.info(f"Checking evaluation status for quiz_id: {quiz_id}")
+    try:
+        # For EVALUATING - Check Worker
+        if quiz_id in get_running_quiz_ids():
+            quiz_queue_status = "EVALUATING"
+
+        else:  # If not in job registeries (failed, completed, queued)
+            # For QUEUED, FAILED, COMPLETED
+            quiz_queue_status = get_quiz_status_from_queue(
+                app.state.task_queue, quiz_id
+            )  # Can be none
+            if quiz_queue_status:
+                quiz_queue_status = quiz_queue_status.get(
+                    "queue_status", "UNKNOWN"
+                ).upper()  # queued, failed, completed
+
+            else:
+                # For EVALUATED, UNEVALUATED
+                cursor, _ = get_postgres_cursor()
+                quiz_queue_status = get_quiz_isevaluated(cursor, quiz_id)
+                cursor.close()
+
+            if quiz_queue_status is None:
+                quiz_queue_status = "UNKNOWN"
+    except Exception as e:
+        logger.error(
+            f"Unexpected error while checking status for quiz {quiz_id}: {str(e)}",
+            exc_info=True,
+        )
+        return {
+            "quiz_id": quiz_id,
+            "message": "Unexpected error",
+            "status": 500,
+        }
+
+    progress = redis_client.get(f"quiz_progress:{quiz_id}")
     if progress:
         try:
             progress = json.loads(progress)
@@ -75,11 +119,31 @@ async def get_evaluation_status(quiz_id: str, redis_client=Depends(get_redis_cli
             logger.error(
                 f"Error decoding JSON for quiz {quiz_id} while checking status: {str(e)}"
             )
-            return {"quiz_id": quiz_id, "message": "Invalid progress data"}
+            return {
+                "quiz_id": quiz_id,
+                "message": "Invalid progress data",
+                "status": 500,
+            }
 
-        return {"quiz_id": quiz_id, **(progress or {})}
-
-    return {"quiz_id": quiz_id, "message": "No Evaluation is Running"}
+    if quiz_queue_status in [
+        "EVALUATED",
+        "QUEUED",
+        "EVALUATING",
+    ]:  # value can also be ["UNEVALUATED", "COMPLETED", "FAILED","UNKNOWN",]
+        return {
+            "quiz_id": quiz_id,
+            "message": f"Evaluation is {quiz_queue_status}",
+            **(progress or {}),
+            "status": 200,
+            "job_status": quiz_queue_status,
+        }
+    else:
+        return {
+            "quiz_id": quiz_id,
+            "message": "No Evaluation is Running",
+            "status": 303,
+            "job_status": quiz_queue_status,
+        }
 
 
 @router.post("/evaluate")

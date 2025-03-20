@@ -73,7 +73,7 @@ def get_db_connection_no_context():
     # Get cursor
     cursor = conn.cursor(cursor_factory=RealDictCursor)
 
-    return conn, cursor
+    return cursor, conn
 
 
 @contextmanager

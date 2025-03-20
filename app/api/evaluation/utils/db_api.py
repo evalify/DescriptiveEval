@@ -225,6 +225,36 @@ async def set_quiz_response(cursor, conn, response: dict):
             wait_time = 2**retries
             await asyncio.sleep(wait_time)
 
+        # Errors that require a new connection but not backoff
+        # This includes cursor closed errors
+        except (psycopg2.InterfaceError, psycopg2.ProgrammingError) as e:
+            # Cursor is closed, get a new connection
+            logger.warning(
+                f"Cursor closed for response {response['id']} (attempt {retries + 1})"
+            )
+            cursor, conn = get_db_connection_no_context()
+            new_cursor = True
+            retries += 1
+            if retries == max_retries:
+                logger.error(
+                    f"Max retries reached for updating response {response['id']}"
+                )
+                raise
+
+        # For operational/database errors - add backoff
+        except (psycopg2.OperationalError, psycopg2.DatabaseError) as e:
+            retries += 1
+            logger.error(
+                f"Op/Db Error for response {response['id']}: {str(e)} - retry {retries}/{max_retries}"
+            )
+            if retries == max_retries:
+                logger.error(
+                    f"Max retries reached for updating response {response['id']}"
+                )
+                raise
+            wait_time = 2**retries  # Add exponential backoff for these errors
+            await asyncio.sleep(wait_time)
+
         except Exception as e:
             retries += 1
             logger.error(
@@ -235,7 +265,7 @@ async def set_quiz_response(cursor, conn, response: dict):
                     f"Max retries reached for updating response {response['id']}"
                 )
                 raise
-            wait_time = 2**retries
+            wait_time = 1  # Add a fixed wait time for other errors
             await asyncio.sleep(wait_time)
 
         finally:
@@ -291,6 +321,21 @@ def get_evaluation_settings(cursor, quiz_id: str) -> Optional[Dict[str, Any]]:
     """
     query = """
        SELECT * FROM "EvaluationSettings" WHERE "quizId" = %s;
+    """
+    cursor.execute(query, (quiz_id,))
+    return cursor.fetchone()
+
+
+def get_quiz_isevaluated(
+    cursor,
+    quiz_id: str,
+) -> Optional[Dict[str, Any]]:
+    """
+    Get the evaluation status for
+    a quiz from the Cockroach database.
+    """
+    query = """
+       SELECT "isEvaluated" FROM "Quiz" WHERE "id" = %s;
     """
     cursor.execute(query, (quiz_id,))
     return cursor.fetchone()

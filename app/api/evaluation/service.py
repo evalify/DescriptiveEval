@@ -283,7 +283,7 @@ async def bulk_evaluate_quiz_responses(
                             quiz_id,
                             progress_bar,
                             qlogger,
-                            "evaluation_complete",
+                            "evaluation_in_progress",
                         )
                     except asyncio.TimeoutError:
                         qlogger.error(
@@ -367,12 +367,17 @@ async def bulk_evaluate_quiz_responses(
                 unevaluated_quiz_responses.append(quiz_result)
 
             progress_bar = tqdm(
-                unevaluated_quiz_responses,
+                quiz_responses,
                 desc=f"Evaluating {quiz_id}",
                 unit="response",
                 dynamic_ncols=True,
             )
-            update_progress(redis_client, quiz_id, progress_bar, qlogger)
+            # Update progress bar to initialize with the  0 + number of evaluated responses
+            progress_bar.n = len(evaluated_quiz_responses)
+
+            update_progress(
+                redis_client, quiz_id, progress_bar, qlogger, "initializing"
+            )
             qlogger.info(f"Questions count by type: {question_count_by_type}")
             qlogger.info(f"Selective evaluation: {types_to_evaluate}")
 
@@ -484,6 +489,11 @@ async def bulk_evaluate_quiz_responses(
 
         # Add the evaluated responses to the main list, for the sake of saving to file and generating report
         quiz_responses = evaluated_quiz_responses + unevaluated_quiz_responses
+
+        # Mark progress as complete
+        update_progress(
+            redis_client, quiz_id, progress_bar, qlogger, "evaluation_complete"
+        )
 
     except Exception as e:
         qlogger.error(f"Evaluation failed: {str(e)}", exc_info=True)

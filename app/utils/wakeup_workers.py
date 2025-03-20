@@ -357,7 +357,7 @@ def check_workers(processes):
             ]
 
         active_workers = sum(1 for s in status_info if s["status"] == "running")
-        logger.info(
+        logger.debug(
             f"Status check complete. {active_workers}/{len(processes)} workers active"
         )
         return status_info
@@ -369,6 +369,23 @@ def check_workers(processes):
             {"worker_id": i + 1, "status": "unknown", "pid": p.pid}
             for i, p in enumerate(processes)
         ]
+
+
+def get_running_quiz_ids():
+    """
+    Get the quiz IDs of currently running jobs.
+
+    Returns:
+        list: List of quiz IDs
+    """
+    redis_conn = get_redis_client()
+    workers = Worker.all(connection=redis_conn)
+    running_quiz_ids = []
+    for worker in workers:
+        current_job = worker.get_current_job()
+        if current_job and current_job.args:
+            running_quiz_ids.append(current_job.args[0])
+    return running_quiz_ids
 
 
 if __name__ == "__main__":
