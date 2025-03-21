@@ -16,14 +16,35 @@ MAX_RETRIES = int(
 DESC_EVAL_TIME = float(os.getenv("DESC_EVAL_TIME", 20))
 FITB_EVAL_TIME = float(os.getenv("FITB_EVAL_TIME", 20))
 
+# Batch Size Controls
+MAX_BATCH_SIZE = int(
+    os.getenv("MAX_BATCH_SIZE", 200)
+)  # Max number of students per batch
+
+# For Batching student responses
+DYNAMIC_BATCH_SIZE: bool = os.getenv("DYNAMIC_BATCH_SIZE", "False") == "True"
+
+# Follows this if DYNAMIC_BATCH_SIZE is True
+MAX_PARALLEL_LLM_REQUESTS_PER_QUIZ = int(
+    os.getenv("MAX_PARALLEL_LLM_REQUESTS_PER_QUIZ", 25)
+)
+
+# Follows this if DYNAMIC_BATCH_SIZE is False
 EVAL_BATCH_SIZE = int(os.getenv("EVAL_BATCH_SIZE", 5))
+
+
 BATCH_TIMEOUT = int(os.getenv("BATCH_TIMEOUT", 300))  # 5 minutes timeout per batch
 EVAL_MAX_RETRIES = int(os.getenv("EVAL_MAX_RETRIES", 10))
 
 WORKER_TTL = int(os.getenv("WORKER_TTL", "3600"))
 DB_MAX_RETRIES = int(os.getenv("DB_MAX_RETRIES", 3))
 
+# Coding Questions
 JUDGE_URL = os.getenv("JUDGE_API")
+JUDGE_LANGUAGE_MAP = {
+    "python": 71,
+    "octave": 66,
+}
 
 
 # -------------------------------

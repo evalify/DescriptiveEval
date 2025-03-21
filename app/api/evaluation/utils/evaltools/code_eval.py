@@ -33,7 +33,7 @@ async def evaluate_coding_question(
     language_id = JUDGE_LANGUAGE_MAP.get(language)
     if language_id is None:
         logger.error(f"Unsupported language: {language}")
-        return 0, test_cases_count, ""
+        return 0, test_cases_count, f"Unsupported language {language}"
 
     cleaned_code = cleanCode(student_response, language_id)
 
@@ -49,13 +49,21 @@ async def evaluate_coding_question(
                 logger.warning(
                     "No test cases detected, probably an input function or inf loop"
                 )
-                return 0, test_cases_count, code_output["stdout"]
+                return (
+                    0,
+                    test_cases_count,
+                    code_output["stdout"] + (code_output.get("stderr") or ""),
+                )
 
             if test_cases_count != -1 and total_cases != test_cases_count:
                 logger.warning(
                     f"Expected {test_cases_count} test cases but got {total_cases}"
                 )
-                return 0, test_cases_count, code_output["stdout"]
+                return (
+                    0,
+                    test_cases_count,
+                    code_output["stdout"] + (code_output.get("stderr") or ""),
+                )
 
             if passed_cases == total_cases and total_cases > 0:
                 logger.info("All test cases passed")
@@ -66,7 +74,11 @@ async def evaluate_coding_question(
     except Exception as e:
         logger.error(f"Error evaluating code: {str(e)}")
 
-    return 0, test_cases_count, code_output.get("stdout", "")
+    return (
+        0,
+        test_cases_count,
+        (code_output.get("stdout") or "") + (code_output.get("stderr") or ""),
+    )
 
 
 def cleanCode(code: str, language_id) -> str:
@@ -167,13 +179,11 @@ def get_code_result(
         code = f"_temp = 1;\n{code}"
     if driver_code is not None:
         code = f"{code}\n{driver_code}"
-    else:
-        code = response
 
     headers = {"Content-Type": "application/json"}
     data = {
         "source_code": code,
-        "language_id": language_id,  # For Octave
+        "language_id": language_id,
     }
     if not JUDGE_URL:
         raise ValueError("JUDGE_API is not set in the environment variables")
