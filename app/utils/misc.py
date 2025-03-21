@@ -44,7 +44,7 @@ def save_quiz_data(data: Any, quiz_id: str, file_type: str) -> None:
 
         with open(file_path, "w") as f:
             json.dump(data, f, indent=4, cls=DateTimeEncoder)
-        logger.debug(f"Saved {file_type} data for quiz {quiz_id}")
+        logger.debug(f"Saved {file_type} data for quiz {quiz_id} at {file_path}")
 
     except IOError as e:
         logger.error(f"Failed to save {file_type} data for quiz {quiz_id}: {str(e)}")

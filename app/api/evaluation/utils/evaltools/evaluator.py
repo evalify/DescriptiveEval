@@ -235,7 +235,7 @@ class ResponseEvaluator:
             f"Evaluating response {quiz_result['id']} for student {quiz_result['studentId']}"
         )
         quiz_result["totalScore"] = self.total_marks
-        quiz_result["score"] = 0
+        # quiz_result["score"] = 0
 
         for qid, question in self.questions.items():
             # Handle old schema conversion
@@ -602,7 +602,7 @@ class ResponseEvaluator:
             return
 
         driver_code = question.get("driverCode")
-        test_cases = question.get("testcases", [])
+        test_cases = question.get("testCases", [])
         if not driver_code or not test_cases:
             raise InvalidQuestionError(
                 f"Question {qid} is missing driver code or test cases"

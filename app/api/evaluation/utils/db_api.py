@@ -121,11 +121,12 @@ def get_quiz_responses(
       :param save_to_file: Save the responses to a file (default: True)
       :param override_cache: Override the cache and fetch fresh data (default: False)
     """
-    cached_responses = redis_client.get(f"responses:{quiz_id}_responses_evalcache")
-    if cached_responses and not override_cache:
-        print("Responses Cache hit!")
-        save_quiz_data(json.loads(cached_responses), quiz_id, "responses")
-        return json.loads(cached_responses)
+    if not override_cache:
+        cached_responses = redis_client.get(f"responses:{quiz_id}_responses_evalcache")
+        if cached_responses:
+            print("Responses Cache hit!")
+            save_quiz_data(json.loads(cached_responses), quiz_id, "responses")
+            return json.loads(cached_responses)
 
     query = """
         SELECT * FROM "QuizResult" WHERE "quizId" = %s AND "isSubmitted"=true;
@@ -227,7 +228,7 @@ async def set_quiz_response(cursor, conn, response: dict):
 
         # Errors that require a new connection but not backoff
         # This includes cursor closed errors
-        except (psycopg2.InterfaceError, psycopg2.ProgrammingError) as e:
+        except (psycopg2.InterfaceError, psycopg2.ProgrammingError):
             # Cursor is closed, get a new connection
             logger.warning(
                 f"Cursor closed for response {response['id']} (attempt {retries + 1})"
@@ -237,7 +238,8 @@ async def set_quiz_response(cursor, conn, response: dict):
             retries += 1
             if retries == max_retries:
                 logger.error(
-                    f"Max retries reached for updating response {response['id']}"
+                    f"Max retries reached for updating response {response['id']}",
+                    exc_info=True,
                 )
                 raise
 
@@ -288,11 +290,13 @@ def get_all_questions(
     :param save_to_file: Save the questions to a file (default: True)
     :param override_cache: Override the cache if set to True (default: False)
     """
-    cached_questions = redis_client.get(f"questions:{quiz_id}_questions_evalcache")
-    if cached_questions and not override_cache:
-        print("Questions Cache hit!")
-        save_quiz_data(json.loads(cached_questions), quiz_id, "questions")
-        return json.loads(cached_questions)
+    if not override_cache:
+        cached_questions = redis_client.get(f"questions:{quiz_id}_questions_evalcache")
+        if cached_questions:
+            # Cache hit, return cached questions
+            print("Questions Cache hit!")
+            save_quiz_data(json.loads(cached_questions), quiz_id, "questions")
+            return json.loads(cached_questions)
 
     collection = mongo_db["NEW_QUESTIONS"]
     query = {"quizId": quiz_id}

@@ -129,7 +129,8 @@ async def get_evaluation_status(
         "EVALUATED",
         "QUEUED",
         "EVALUATING",
-    ]:  # value can also be ["UNEVALUATED", "COMPLETED", "FAILED","UNKNOWN",]
+        "COMPLETED",
+    ]:
         return {
             "quiz_id": quiz_id,
             "message": f"Evaluation is {quiz_queue_status}",
@@ -137,7 +138,7 @@ async def get_evaluation_status(
             "status": 200,
             "job_status": quiz_queue_status,
         }
-    else:
+    else:  # value can be ["UNEVALUATED", "FAILED", "UNKNOWN",]
         return {
             "quiz_id": quiz_id,
             "message": "No Evaluation is Running",

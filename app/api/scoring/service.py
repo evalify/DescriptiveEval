@@ -208,6 +208,9 @@ async def generate_guidelines(
                 response = str(response)
             try:
                 parsed_response = guidelines_parser.parse(response)
+                assert parsed_response is not None, (
+                    "Error: Failed to get/parse response"
+                )
             except Exception as e:
                 logger.debug("Detailed Stack Trace for below error", exc_info=True)
                 logger.warning(
