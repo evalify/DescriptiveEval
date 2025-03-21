@@ -1,60 +1,99 @@
 """This module contains utility functions for evaluating coding questions"""
 
 import json
-from app.config.constants import JUDGE_URL
+from app.config.constants import JUDGE_URL, JUDGE_LANGUAGE_MAP
 import re
 from typing import Tuple
 
 import requests
 from dotenv import load_dotenv
+from app.core.logger import logger
 
 load_dotenv()
 
 
 async def evaluate_coding_question(
-    student_response: str, driver_code: str, test_cases_count: int = -1
-) -> Tuple[int, int]:
+    student_response: str,
+    language: str,
+    driver_code: str,
+    test_cases_count: int = -1,
+) -> Tuple[int, int, str]:
     """
     Evaluate a single student response against test cases
-    Returns the number of test cases passed and the total number of test cases
+    Returns the number of test cases passed and the total number of test cases and the code output
 
     :param student_response: Student's response aka boilerplate code
     :param driver_code: Driver code to run the student's code
     :param test_cases_count: Number of test cases that are in the driver code for validation (optional)
     """
     if not student_response:
-        print("⚠️ No response submitted")
-        return 0
+        logger.warning("No response submitted")
+        return 0, 0, ""
 
-    code_index = student_response.rfind("% Driver Code")
-    cleaned_code = cleanCode(
-        student_response[:code_index] if code_index != -1 else student_response
-    )
+    language_id = JUDGE_LANGUAGE_MAP.get(language)
+    if language_id is None:
+        logger.error(f"Unsupported language: {language}")
+        return -1, -1, ""
 
+    cleaned_code = cleanCode(student_response, language_id)
+
+    code_output = {}
     try:
-        code_output = get_code_result(cleaned_code, driver_code)
+        code_output = get_code_result(
+            cleaned_code, driver_code, language_id=language_id
+        )
         if code_output.get("stdout"):
             passed_cases, total_cases = count_test_cases(code_output["stdout"])
 
             if test_cases_count != -1 and total_cases != test_cases_count:
-                print(
-                    f"❌ Expected {test_cases_count} test cases but got {total_cases}"
+                logger.warning(
+                    f"Expected {test_cases_count} test cases but got {total_cases}"
                 )
-                return -1, -1
+                return -1, -1, code_output["stdout"]
 
             if passed_cases == total_cases and total_cases > 0:
-                print("✓ All test cases passed")
-            return passed_cases, total_cases
-        print("❌ No output received")
+                logger.info("All test cases passed")
+            return passed_cases, total_cases, code_output["stdout"]
+        logger.error("No output received")
     except requests.exceptions.ReadTimeout:
-        print("❌ Unable to evaluate code - Timeout")
+        logger.error("Unable to evaluate code - Timeout")
     except Exception as e:
-        print(f"❌ Error evaluating code: {str(e)}")
+        logger.error(f"Error evaluating code: {str(e)}")
 
-    return 0, -1
+    return 0, -1, code_output.get("stdout", "")
 
 
-def cleanCode(code: str) -> str:
+def cleanCode(code: str, language_id) -> str:
+    if language_id == JUDGE_LANGUAGE_MAP["octave"]:
+        return cleanCode_octave(code)
+    elif language_id == JUDGE_LANGUAGE_MAP["python"]:
+        return cleanCode_python(code)
+    else:
+        raise ValueError(
+            f"Unsupported language ID {language_id}. Supported IDs are {JUDGE_LANGUAGE_MAP}"
+        )
+
+
+def cleanCode_python(code: str) -> str:
+    """
+    This function cleans the code by removing all print statements
+    :param code: Raw code
+    :return: Cleaned code
+    """
+    # Regex pattern to match print statements
+    print_pattern = r"^\s*print\(.*\)\s*;?"
+
+    # Function to comment out lines that will lead to printing
+    def comment_out_prints(match):
+        return f"# {match.group(0)}"  # Comment out the entire line
+
+    # Comment out all printing lines
+    code = re.sub(print_pattern, comment_out_prints, code, flags=re.MULTILINE)
+
+    return code
+
+
+def cleanCode_octave(code: str) -> str:
     """
     This function cleans the code by adding semicolons and commenting out print statements
     :param code: Raw code
@@ -106,7 +145,9 @@ def count_test_cases(code_output: str) -> tuple[int, int]:
 
 
 def get_code_result(
-    response: str, driver_code: str = None, language_id: int = 66
+    response: str,
+    driver_code: str = None,
+    language_id: int = JUDGE_LANGUAGE_MAP["octave"],
 ) -> dict:
     """
     This function takes the response code and driver code and returns the output of the code
@@ -115,7 +156,7 @@ def get_code_result(
     :param language_id: Language ID for the code, Default is Octave (66)
     :return: Output of the code
     """
-    if driver_code is not None:
+    if driver_code is not None and language_id == JUDGE_LANGUAGE_MAP["octave"]:
         code = f"_temp = 1;\n{response}\n{driver_code}"
     else:
         code = response

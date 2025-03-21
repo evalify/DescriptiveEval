@@ -5,6 +5,7 @@ This module contains the core evaluation logic that was previously in evaluation
 
 import itertools
 import threading
+import json
 from datetime import datetime
 from typing import Optional, Dict, Any
 from app.api.scoring.service import (
@@ -94,6 +95,9 @@ class ResponseEvaluator:
         # Extract settings
         self.negative_marking = self.evaluation_settings.get("negativeMark", False)
         self.mcq_partial_marking = self.evaluation_settings.get("mcqPartialMark", True)
+        self.coding_partial_marking = self.evaluation_settings.get(
+            "codePartialMark", True
+        )
 
     def _get_next_api_key(self):
         """Thread-safe API key rotation"""
@@ -601,6 +605,9 @@ class ResponseEvaluator:
             )
             return
 
+        response = json.loads(response[0])
+        response = response[0]  # It's nested AGAIN!!
+
         driver_code = question.get("driverCode")
         test_cases = question.get("testCases", [])
         if not driver_code or not test_cases:
@@ -609,11 +616,28 @@ class ResponseEvaluator:
             )
 
         try:
-            coding_score, eval_result = await evaluate_coding_question(
-                student_response=response[0],
+            (
+                coding_passed_cases,
+                coding_total_cases,
+                eval_result,
+            ) = await evaluate_coding_question(
+                student_response=response.get("content"),
+                language=response.get("language"),
                 driver_code=driver_code,
                 test_cases_count=len(test_cases),
             )
+
+            if self.coding_partial_marking:
+                coding_score = (
+                    question_total_score
+                    if coding_passed_cases == coding_total_cases
+                    else 0
+                )
+            else:
+                coding_score = round(
+                    (coding_passed_cases / coding_total_cases) * question_total_score, 2
+                )
+
             QuizResponseSchema.set_attribute(quiz_result, qid, "score", coding_score)
             if eval_result:
                 QuizResponseSchema.set_attribute(
