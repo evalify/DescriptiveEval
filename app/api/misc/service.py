@@ -26,7 +26,7 @@ async def fetch_course_report(course_id: str):
     JOIN "_CourseToQuiz" cq ON c."id" = cq."A"
     LEFT JOIN "Quiz" q ON cq."B" = q."id"
     LEFT JOIN "QuizResult" qr ON s."id" = qr."studentId" AND cq."B" = qr."quizId"
-    WHERE c."id" = %s
+    WHERE c."id" = %s AND q."isEvaluated" = 'EVALUATED'
     ORDER BY s."id", cq."B";
     """
     with get_db_cursor() as (cursor, conn):
@@ -124,7 +124,7 @@ def format_date(date_str):
 async def generate_excel_report(course_id: str, save_to_file: bool = True):
     """
     Generate an Excel report for the course.
-    Returns a BytesIO object containing the Excel file.
+    Returns a Dictionary with the Excel file as BytesIO Object and course code.
     """
     logger.debug(
         f"Generating Excel report for course ID: {course_id}, save_to_file: {save_to_file}"
@@ -139,6 +139,8 @@ async def generate_excel_report(course_id: str, save_to_file: bool = True):
 
     # Create DataFrame for student data
     df = pd.DataFrame(students_data)
+    # Replace NaN values with "Absent"
+    df = df.fillna("Absent")
     logger.debug("DataFrame created from student data.")
 
     # Create Excel file in memory
@@ -269,12 +271,11 @@ async def generate_excel_report(course_id: str, save_to_file: bool = True):
 
     # Reset file pointer to beginning
     output.seek(0)
-    logger.debug("File pointer reset to beginning.")
 
     # Save the Excel file to a BytesIO object
     if save_to_file:
-        await save_excel_report(output, course_id)
-    return output
+        await save_excel_report(output, course_code)
+    return {"file": output, "course_code": course_code}
 
 
 def get_column_letter(col_idx):
@@ -285,22 +286,20 @@ def get_column_letter(col_idx):
 
 
 async def save_excel_report(
-    excel_data: BytesIO, course_id: str, directory: str = "data/reports"
+    excel_data: BytesIO, course_code: str, directory: str = "data/reports"
 ):
     """
     Save the Excel report (BytesIO object) to a file and return the file path.
     """
     logger.debug(
-        f"Saving Excel report for course ID: {course_id} to directory: {directory}"
+        f"Saving Excel report for course ID: {course_code} to directory: {directory}"
     )
     # Create directory if it doesn't exist
     os.makedirs(directory, exist_ok=True)
-    logger.debug(f"Directory '{directory}' created (if not exists).")
 
     # Create filename with timestamp
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{directory}/course_{course_id}_report_{timestamp}.xlsx"
-    logger.debug(f"Filename generated: {filename}")
+    filename = f"{directory}/course_{course_code}_report_{timestamp}.xlsx"
 
     # Save to file
     with open(filename, "wb") as file:

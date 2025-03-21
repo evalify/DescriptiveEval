@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 from app.api.misc.service import generate_excel_report
 from app.core.logger import logger
+import time
 
 router = APIRouter(prefix="/misc", tags=["Miscellaneous"])
 
@@ -20,15 +21,15 @@ async def get_course_report(course_id: str):
         # Generate the Excel report
         logger.info(f"Generating Excel report for course: {course_id}")
         excel_data = await generate_excel_report(course_id)
-
-        # Create filename with course ID for the download
-        filename = f"course_{course_id}_report.xlsx"
+        course_code = excel_data.get("course_code")
+        # Create filename with course code and timestamp for the download
+        filename = f"{course_code}_course_report_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
         logger.debug(f"Created filename: {filename}")
 
         # Return the Excel file as a streaming response
         logger.info(f"Streaming Excel report for course: {course_id}")
         return StreamingResponse(
-            excel_data,
+            excel_data["file"],
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
