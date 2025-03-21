@@ -131,6 +131,9 @@ async def get_evaluation_status(
         "EVALUATING",
         "COMPLETED",
     ]:
+        quiz_queue_status = (
+            "COMPLETED" if quiz_queue_status == "EVALUATED" else quiz_queue_status
+        )
         return {
             "quiz_id": quiz_id,
             "message": f"Evaluation is {quiz_queue_status}",
