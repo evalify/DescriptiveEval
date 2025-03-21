@@ -629,7 +629,8 @@ class ResponseEvaluator:
 
             if self.coding_partial_marking:
                 coding_score = round(
-                    (coding_passed_cases / (coding_total_cases)) * question_total_score, 2
+                    (coding_passed_cases / (coding_total_cases)) * question_total_score,
+                    2,
                 )
             else:
                 coding_score = (
@@ -639,9 +640,7 @@ class ResponseEvaluator:
                 )
 
             QuizResponseSchema.set_attribute(quiz_result, qid, "score", coding_score)
-                QuizResponseSchema.set_attribute(
-                    quiz_result, qid, "remarks", eval_result
-                )
+            QuizResponseSchema.set_attribute(quiz_result, qid, "remarks", eval_result)
 
             self._update_response_metadata(
                 response_id,

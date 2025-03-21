@@ -44,6 +44,7 @@ async def evaluate_bulk(request: EvalRequest, llm=Depends(get_llm_dependency)):
             redis_client,
             save_to_file=True,
             llm=llm,
+            types_to_evaluate=request.types_to_evaluate,
         )
         return {"message": "Evaluation complete", "results": results}
     except InvalidQuizIDError as e:
@@ -95,7 +96,9 @@ async def get_evaluation_status(
             else:
                 # For EVALUATED, UNEVALUATED
                 cursor, _ = get_postgres_cursor()
-                quiz_queue_status = get_quiz_isevaluated(cursor, quiz_id)
+                quiz_queue_status = get_quiz_isevaluated(cursor, quiz_id).get(
+                    "isEvaluated"
+                )
                 cursor.close()
 
             if quiz_queue_status is None:
