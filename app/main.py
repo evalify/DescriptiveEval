@@ -16,6 +16,7 @@ from .api.evaluation.router import router as evaluation_router
 from .api.provider.router import router as provider_router
 from .api.scoring.router import router as scoring_router
 from .api.workers.router import router as workers_router
+from .api.misc.router import router as misc_router
 
 # FIXME: Temporary models import for redirects
 from .api.evaluation.models import EvalRequest
@@ -51,6 +52,7 @@ app.include_router(evaluation_router)
 app.include_router(provider_router)
 app.include_router(scoring_router)
 app.include_router(workers_router)
+app.include_router(misc_router)
 
 app.add_middleware(
     CORSMiddleware,
