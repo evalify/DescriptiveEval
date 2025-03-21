@@ -45,6 +45,12 @@ async def evaluate_coding_question(
         if code_output.get("stdout"):
             passed_cases, total_cases = count_test_cases(code_output["stdout"])
 
+            if total_cases == 0:
+                logger.warning(
+                    "No test cases detected, probably an input function or inf loop"
+                )
+                return 0, test_cases_count, code_output["stdout"]
+
             if test_cases_count != -1 and total_cases != test_cases_count:
                 logger.warning(
                     f"Expected {test_cases_count} test cases but got {total_cases}"
@@ -156,8 +162,11 @@ def get_code_result(
     :param language_id: Language ID for the code, Default is Octave (66)
     :return: Output of the code
     """
-    if driver_code is not None and language_id == JUDGE_LANGUAGE_MAP["octave"]:
-        code = f"_temp = 1;\n{response}\n{driver_code}"
+    code = response
+    if language_id == JUDGE_LANGUAGE_MAP["octave"]:
+        code = f"_temp = 1;\n{code}"
+    if driver_code is not None:
+        code = f"{code}\n{driver_code}"
     else:
         code = response
 
