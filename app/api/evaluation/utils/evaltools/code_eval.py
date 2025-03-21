@@ -28,12 +28,12 @@ async def evaluate_coding_question(
     """
     if not student_response:
         logger.warning("No response submitted")
-        return 0, 0, ""
+        return 0, test_cases_count, ""
 
     language_id = JUDGE_LANGUAGE_MAP.get(language)
     if language_id is None:
         logger.error(f"Unsupported language: {language}")
-        return -1, -1, ""
+        return 0, test_cases_count, ""
 
     cleaned_code = cleanCode(student_response, language_id)
 
@@ -55,7 +55,7 @@ async def evaluate_coding_question(
                 logger.warning(
                     f"Expected {test_cases_count} test cases but got {total_cases}"
                 )
-                return -1, -1, code_output["stdout"]
+                return 0, test_cases_count, code_output["stdout"]
 
             if passed_cases == total_cases and total_cases > 0:
                 logger.info("All test cases passed")
@@ -66,7 +66,7 @@ async def evaluate_coding_question(
     except Exception as e:
         logger.error(f"Error evaluating code: {str(e)}")
 
-    return 0, -1, code_output.get("stdout", "")
+    return 0, test_cases_count, code_output.get("stdout", "")
 
 
 def cleanCode(code: str, language_id) -> str:
