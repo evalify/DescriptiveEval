@@ -68,7 +68,7 @@ async def evaluate_coding_question(
             if passed_cases == total_cases and total_cases > 0:
                 logger.info("All test cases passed")
             return passed_cases, total_cases, code_output["stdout"]
-        logger.error("No output received")
+        logger.warning("No output received")
     except requests.exceptions.ReadTimeout:
         logger.error("Unable to evaluate code - Timeout")
     except Exception as e:

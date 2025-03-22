@@ -3,8 +3,212 @@ import pandas as pd
 from io import BytesIO
 import os
 from datetime import datetime
-from pytz import timezone
+
 from app.core.logger import logger
+from .utils import format_date, get_column_letter
+from typing import Dict
+
+
+def populate_course_sheet(
+    writer, course_id: str, report_data: dict, sheet_name: str = None
+):
+    """
+    Helper function to populate a course report sheet in an Excel workbook.
+    This reduces redundancy between generate_excel_report and generate_excel_class_report.
+
+    Args:
+        writer: pd.ExcelWriter - The Excel writer to use
+        course_id: str - The course ID
+        report_data: dict - The report data from fetch_course_report
+        sheet_name: str - The sheet name to use (defaults to course_code if not provided)
+    """
+    # Create DataFrame for student data
+    df = pd.DataFrame(report_data["students"])
+    # Replace NaN values with "0"
+    df = df.fillna(0)
+    logger.debug("DataFrame created from student data.")
+
+    # Get course and class details
+    with get_db_cursor() as (cursor, conn):
+        cursor.execute(
+            'SELECT "name", "code" FROM "Course" WHERE "id" = %s', (course_id,)
+        )
+        course_result = cursor.fetchone()
+        course_name = course_result["name"] if course_result else course_id
+        course_code = course_result["code"] if course_result else ""
+
+        cursor.execute(
+            'SELECT "name" FROM "Class" WHERE "id" = %s', (report_data["class_id"],)
+        )
+        class_result = cursor.fetchone()
+        class_name = class_result["name"] if class_result else report_data["class_id"]
+    logger.debug("Course and class names fetched from database.")
+
+    # Determine sheet name if not provided
+    if not sheet_name:
+        sheet_name = (
+            course_code[:30] if course_code else course_id[:30]
+        )  # Excel sheet name limit is 31 characters
+
+    # Write student data to sheet, starting from row 12 to leave space for headers
+    df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=11)
+    logger.debug("Student data written to Excel sheet.")
+
+    # Get the worksheet to apply formatting
+    workbook = writer.book
+    worksheet = workbook[sheet_name]
+
+    # Add title and summary information
+    from openpyxl.styles import Font, Border, PatternFill, Alignment
+
+    # Title row: merged cells A1 to H1 for a prominent course title
+    worksheet.merge_cells("A1:H1")
+    worksheet["A1"] = f"{course_code} - {course_name}"
+    worksheet["A1"].font = Font(size=22, bold=True)
+    worksheet["A1"].alignment = Alignment(horizontal="center", vertical="center")
+    worksheet["A1"].fill = PatternFill(
+        start_color="D9E1F2", end_color="D9E1F2", fill_type="solid"
+    )
+    logger.debug("Title row formatted.")
+
+    # Summary section starting at row 2 with clear labels and values
+    summary_data = [
+        ("Course Code:", course_code),
+        ("Course Name:", course_name),
+        ("Class Name:", class_name),
+        ("Total Students:", report_data["student_count"]),
+        ("Total Quizzes:", report_data["quiz_count"]),
+        ("Generated On:", datetime.now().strftime("%d/%m/%Y %H:%M:%S")),
+        ("CourseId:", course_id),
+        ("ClassId:", report_data["class_id"]),
+    ]
+    for i, (label, value) in enumerate(summary_data, start=2):
+        label_cell = worksheet[f"A{i}"]
+        label_cell.value = label
+        label_cell.font = Font(bold=True)
+        worksheet[f"B{i}"] = value
+    logger.debug("Summary data added to Excel sheet.")
+
+    # Student data headers (and data) will start from row 12, as defined in df.to_excel
+
+    # Make the main headers bold (row 12)
+    for cell in worksheet[12]:  # Row 12 has the student headers
+        cell.border = Border()  # Remove border for dumped cells
+        if cell.value in ["Student Name", "Roll Number"]:
+            cell.font = Font(bold=True)
+    logger.debug("Student data headers formatted.")
+
+    # Quiz details header section
+    quiz_details = report_data["quiz_details"]
+    start_col = 3  # starting from column C
+
+    # Place Quiz Titles in row 9 with contrasting style and wrap text enabled
+    for idx, quizId in enumerate(quiz_details, start=start_col):
+        col_letter = get_column_letter(idx)
+        cell = worksheet[f"{col_letter}9"]
+        cell.value = quiz_details[quizId]["title"]
+        cell.font = Font(bold=True, color="FFFFFF")
+        cell.fill = PatternFill(
+            start_color="4F81BD", end_color="4F81BD", fill_type="solid"
+        )
+        # Enable text wrapping to handle long quiz titles
+        cell.alignment = Alignment(
+            wrap_text=True, horizontal="center", vertical="center"
+        )
+
+    # Place Quiz Dates in row 10
+    for idx, quizId in enumerate(quiz_details, start=start_col):
+        col_letter = get_column_letter(idx)
+        worksheet[f"{col_letter}10"] = quiz_details[quizId]["date"]
+        worksheet[f"{col_letter}10"].font = Font(bold=True)
+        worksheet[f"{col_letter}10"].fill = PatternFill(
+            start_color="FFD966", end_color="FFD966", fill_type="solid"
+        )
+    logger.debug("Quiz dates added to Excel sheet.")
+
+    # Place Quiz Total Scores in row 11
+    for idx, quizId in enumerate(quiz_details, start=start_col):
+        col_letter = get_column_letter(idx)
+        worksheet[f"{col_letter}11"] = f"Total: {quiz_details[quizId]['totalScore']}"
+        worksheet[f"{col_letter}11"].font = Font(bold=True)
+        worksheet[f"{col_letter}11"].fill = PatternFill(
+            start_color="FFD966", end_color="FFD966", fill_type="solid"
+        )
+        worksheet[f"{col_letter}11"].alignment = Alignment(horizontal="left")
+    logger.debug("Quiz total scores added to Excel sheet.")
+
+    # Auto-adjust column width
+    for col in worksheet.columns:
+        max_length = 0
+        column = col[0].column if hasattr(col[0], "column") else col[0].column_letter
+        column_letter = get_column_letter(column) if isinstance(column, int) else column
+        for cell in col:
+            if cell.value:
+                max_length = max(max_length, len(str(cell.value)))
+        adjusted_width = max_length + 2
+        worksheet.column_dimensions[column_letter].width = adjusted_width
+    logger.debug("Column widths auto-adjusted.")
+
+    return course_code
+
+
+async def generate_excel_class_report(
+    class_id: str, save_to_file: bool = True
+) -> Dict[str, BytesIO | str]:
+    """
+    Generate a multi-sheet Excel report for all courses in a class.
+    Each course report will be a separate sheet in the Excel file.
+    """
+    # Get all courseids for the class
+    query = """
+    SELECT c."id" AS "courseId"
+    FROM "Course" c
+    WHERE c."classId" = %s;
+    """
+    query2 = """SELECT cl."name" FROM "Class" cl WHERE cl."id" = %s;"""
+    with get_db_cursor() as (cursor, conn):
+        cursor.execute(query, (class_id,))
+        rows = cursor.fetchall()
+        logger.debug(f"Query executed, {len(rows)} rows fetched.")
+        cursor.execute(query2, (class_id,))
+        class_name = cursor.fetchone()["name"]
+        logger.debug(f"Class name fetched: {class_name}")
+    course_ids = [row["courseId"] for row in rows]
+    logger.debug(f"Course IDs fetched for class {class_id}: {course_ids}")
+
+    if not course_ids:
+        logger.debug("No courses found for this class.")
+        return None
+
+    outfile = BytesIO()
+    # Create a single Excel writer for multiple sheets
+    with pd.ExcelWriter(outfile, engine="openpyxl") as writer:
+        for course_id in course_ids:
+            report_data = await fetch_course_report(course_id)
+            populate_course_sheet(writer, course_id, report_data)
+            logger.debug(f"Report sheet generated for course ID: {course_id}")
+
+    # Reset file pointer to beginning
+    outfile.seek(0)
+
+    # Save the Excel file
+    if save_to_file:
+        # Create directory if it doesn't exist
+        directory = "data/reports"
+        os.makedirs(directory, exist_ok=True)
+
+        # Create filename with timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{directory}/class_{class_id}_report_{timestamp}.xlsx"
+
+        # Save to file
+        with open(filename, "wb") as file:
+            file.write(outfile.getvalue())
+        logger.debug(f"Excel report saved to {filename}")
+        return filename
+
+    logger.debug(f"Excel report created in memory for class ID: {class_id}")
+    return {"file": outfile, "class_name": class_name}
 
 
 async def fetch_course_report(course_id: str):
@@ -26,13 +230,16 @@ async def fetch_course_report(course_id: str):
     JOIN "_CourseToQuiz" cq ON c."id" = cq."A"
     LEFT JOIN "Quiz" q ON cq."B" = q."id"
     LEFT JOIN "QuizResult" qr ON s."id" = qr."studentId" AND cq."B" = qr."quizId"
-    WHERE c."id" = %s AND q."isEvaluated" = 'EVALUATED'
+    WHERE c."id" = %s AND q."isEvaluated" = 'EVALUATED' AND qr."isEvaluated" = 'EVALUATED'
     ORDER BY s."id", cq."B";
     """
     with get_db_cursor() as (cursor, conn):
         cursor.execute(query, (course_id,))
         rows = cursor.fetchall()
         logger.debug(f"Query executed, {len(rows)} rows fetched.")
+
+    unique_quiz_ids = set(row["quizId"] for row in rows)
+    logger.debug(f"Unique quiz IDs fetched: {unique_quiz_ids}")
 
     # Dictionary to store student data
     students_data = {}
@@ -56,7 +263,9 @@ async def fetch_course_report(course_id: str):
                 and quiz_info[quiz_id]["totalScore"] is not None
             ):
                 if row["totalScore"] != quiz_info[quiz_id]["totalScore"]:
-                    raise ValueError(f"Inconsistent total scores for quiz {quiz_id}")
+                    raise ValueError(
+                        f"Inconsistent total scores for quiz {quiz_id}, check {row['studentId']}"
+                    )
 
         if class_id is None and row["classId"]:
             class_id = row["classId"]
@@ -72,10 +281,10 @@ async def fetch_course_report(course_id: str):
                 "Student Name": row.get("studentName", ""),
                 "Roll Number": row.get("studentRollNo", ""),
             }
-            logger.debug(f"Student ID {student_id} added to students_data.")
+            # logger.debug(f"Student ID {student_id} added to students_data.")
 
         # Add quiz score info (only score, not total)
-        students_data[student_id][quiz_info[quiz_id]["title"]] = row["score"]
+        students_data[student_id][quiz_id] = row["score"]
 
     # Convert to list for dataframe
     students_list = list(students_data.values())
@@ -85,7 +294,8 @@ async def fetch_course_report(course_id: str):
     quiz_details = {}
     for quiz_id, info in quiz_info.items():
         title = info["title"]
-        quiz_details[title] = {
+        quiz_details[quiz_id] = {
+            "title": title,
             "totalScore": info["totalScore"],
             "date": format_date(info["startTime"]) if info["startTime"] else "N/A",
         }
@@ -100,28 +310,9 @@ async def fetch_course_report(course_id: str):
     }
 
 
-def format_date(date_str):
-    """Convert UTC datetime string to IST date string"""
-    if not date_str:
-        return "N/A"
-    try:
-        # Check if date_str is already a datetime object
-        if isinstance(date_str, str):
-            # Parse the datetime string
-            utc_dt = datetime.strptime(date_str, "%Y-%m-%d %H:%M:%S")
-        else:
-            utc_dt = date_str
-        # Convert to IST (UTC+5:30)
-        ist = timezone("Asia/Kolkata")
-        ist_dt = utc_dt.replace(tzinfo=timezone("UTC")).astimezone(ist)
-        # Format as date string
-        return ist_dt.strftime("%d/%m/%Y")
-    except Exception as e:
-        print(f"Error formatting date: {e}")
-        return date_str
-
-
-async def generate_excel_report(course_id: str, save_to_file: bool = True):
+async def generate_excel_report(
+    course_id: str, output_file: BytesIO = None, save_to_file: bool = True
+):
     """
     Generate an Excel report for the course.
     Returns a Dictionary with the Excel file as BytesIO Object and course code.
@@ -131,143 +322,17 @@ async def generate_excel_report(course_id: str, save_to_file: bool = True):
     )
     # Fetch the course report data
     report_data = await fetch_course_report(course_id)
-    students_data = report_data["students"]
-    quiz_details = report_data["quiz_details"]
-    class_id = report_data["class_id"]
-    student_count = report_data["student_count"]
-    quiz_count = report_data["quiz_count"]
-
-    # Create DataFrame for student data
-    df = pd.DataFrame(students_data)
-    # Replace NaN values with "Absent"
-    df = df.fillna("Absent")
-    logger.debug("DataFrame created from student data.")
 
     # Create Excel file in memory
-    output = BytesIO()
-    logger.debug("BytesIO object created for Excel file.")
+    if not output_file:
+        output = BytesIO()
+        logger.debug("BytesIO object created for Excel file.")
+    else:
+        output = output_file
 
-    # Get course name for the report title
-    with get_db_cursor() as (cursor, conn):
-        cursor.execute(
-            'SELECT "name", "code" FROM "Course" WHERE "id" = %s', (course_id,)
-        )
-        course_result = cursor.fetchone()
-        course_name = course_result["name"] if course_result else course_id
-        course_code = course_result["code"] if course_result else ""
-
-        cursor.execute('SELECT "name" FROM "Class" WHERE "id" = %s', (class_id,))
-        class_result = cursor.fetchone()
-        class_name = class_result["name"] if class_result else class_id
-    logger.debug("Course and class names fetched from database.")
-
-    # Create Excel writer
+    # Create Excel writer and populate the sheet
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        # Write student data to sheet, starting from row 12 to leave space for headers
-        df.to_excel(writer, sheet_name="Student Scores", index=False, startrow=11)
-        logger.debug("Student data written to Excel sheet.")
-
-        # Get the worksheet to apply formatting
-        workbook = writer.book
-        worksheet = workbook["Student Scores"]
-
-        # Add title and summary information
-        from openpyxl.styles import Font, Border, PatternFill, Alignment
-
-        # Title row: merged cells A1 to H1 for a prominent course title
-        worksheet.merge_cells("A1:H1")
-        worksheet["A1"] = f"{course_code} - {course_name}"
-        worksheet["A1"].font = Font(size=22, bold=True)
-        worksheet["A1"].alignment = Alignment(horizontal="center", vertical="center")
-        worksheet["A1"].fill = PatternFill(
-            start_color="D9E1F2", end_color="D9E1F2", fill_type="solid"
-        )
-        logger.debug("Title row formatted.")
-
-        # Summary section starting at row 2 with clear labels and values
-        summary_data = [
-            ("Course Code:", course_code),
-            ("Course Name:", course_name),
-            ("Class Name:", class_name),
-            ("Total Students:", student_count),
-            ("Total Quizzes:", quiz_count),
-            ("Generated On:", datetime.now().strftime("%d/%m/%Y %H:%M:%S")),
-            ("CourseId:", course_id),
-            ("ClassId:", class_id),
-        ]
-        for i, (label, value) in enumerate(summary_data, start=2):
-            label_cell = worksheet[f"A{i}"]
-            label_cell.value = label
-            label_cell.font = Font(bold=True)
-            worksheet[f"B{i}"] = value
-        logger.debug("Summary data added to Excel sheet.")
-
-        # Student data headers (and data) will start from row 12, as defined in df.to_excel
-
-        # Make the main headers bold (row 12)
-        for cell in worksheet[12]:  # Row 12 has the student headers
-            cell.border = Border()  # Remove border for dumped cells
-            if cell.value not in ["Student Name", "Roll Number"]:
-                # Empty cell for quiz title
-                cell.value = ""
-            else:
-                cell.font = Font(bold=True)
-        logger.debug("Student data headers formatted.")
-
-        # Quiz details header section starting at row 8, leaving ample space for the summary above
-        quiz_titles = list(quiz_details.keys())
-        start_col = 3  # starting from column C
-        # Place Quiz Titles in row 10 with contrasting style and wrap text enabled
-        for idx, title in enumerate(quiz_titles, start=start_col):
-            col_letter = get_column_letter(idx)
-            cell = worksheet[f"{col_letter}10"]
-            cell.value = title
-            cell.font = Font(bold=True, color="FFFFFF")
-            cell.fill = PatternFill(
-                start_color="4F81BD", end_color="4F81BD", fill_type="solid"
-            )
-            # Enable text wrapping to handle long quiz titles
-            cell.alignment = Alignment(
-                wrap_text=True, horizontal="center", vertical="center"
-            )
-        logger.debug("Quiz titles added to Excel sheet.")
-
-        # Place Quiz Dates in row 11
-        for idx, title in enumerate(quiz_titles, start=start_col):
-            col_letter = get_column_letter(idx)
-            worksheet[f"{col_letter}11"] = quiz_details[title]["date"]
-            worksheet[f"{col_letter}11"].font = Font(bold=True)
-            worksheet[f"{col_letter}11"].fill = PatternFill(
-                start_color="FFD966", end_color="FFD966", fill_type="solid"
-            )
-        logger.debug("Quiz dates added to Excel sheet.")
-
-        # Place Quiz Total Scores in row 12
-        for idx, title in enumerate(quiz_titles, start=start_col):
-            col_letter = get_column_letter(idx)
-            worksheet[f"{col_letter}12"] = f"Total: {quiz_details[title]['totalScore']}"
-            worksheet[f"{col_letter}12"].font = Font(bold=True)
-            worksheet[f"{col_letter}12"].fill = PatternFill(
-                start_color="FFD966", end_color="FFD966", fill_type="solid"
-            )
-            worksheet[f"{col_letter}12"].alignment = Alignment(horizontal="left")
-        logger.debug("Quiz total scores added to Excel sheet.")
-
-        # Auto-adjust column width
-        for col in worksheet.columns:
-            max_length = 0
-            column = (
-                col[0].column if hasattr(col[0], "column") else col[0].column_letter
-            )
-            column_letter = (
-                get_column_letter(column) if isinstance(column, int) else column
-            )
-            for cell in col:
-                if cell.value:
-                    max_length = max(max_length, len(str(cell.value)))
-            adjusted_width = max_length + 2
-            worksheet.column_dimensions[column_letter].width = adjusted_width
-        logger.debug("Column widths auto-adjusted.")
+        course_code = populate_course_sheet(writer, course_id, report_data)
 
     # Reset file pointer to beginning
     output.seek(0)
@@ -276,13 +341,6 @@ async def generate_excel_report(course_id: str, save_to_file: bool = True):
     if save_to_file:
         await save_excel_report(output, course_code)
     return {"file": output, "course_code": course_code}
-
-
-def get_column_letter(col_idx):
-    """Convert column index to Excel column letter (1-based)"""
-    from openpyxl.utils import get_column_letter as openpyxl_get_column_letter
-
-    return openpyxl_get_column_letter(col_idx)
 
 
 async def save_excel_report(
@@ -314,15 +372,20 @@ if __name__ == "__main__":
     import asyncio
 
     # Test fetch_course_report
-    course_id = "2267b112a08249659ca72519f78ca56d"
-    report = asyncio.run(fetch_course_report(course_id))
-    # print(report)
-    with open("data/course_report.json", "w") as f:
-        import json
-        from app.utils.misc import DateTimeEncoder
+    course_id = "155de92a02124783b8b4cca04de66819"
+    # report = asyncio.run(fetch_course_report(course_id))
+    # # print(report)
+    # with open("data/course_report1.json", "w") as f:
+    #     import json
+    #     from app.utils.misc import DateTimeEncoder
 
-        json.dump(report, f, indent=4, cls=DateTimeEncoder)
+    #     json.dump(report, f, indent=4, cls=DateTimeEncoder)
 
     # Test save_excel_report
     directory = "data/reports"
     filename = asyncio.run(generate_excel_report(course_id, save_to_file=True))
+
+    # Test generate_excel_class_report
+    # class_id = "cm48alxli00007ke7ch082mz0"
+    # report = asyncio.run(generate_excel_class_report(class_id, save_to_file=True))
+    # print(report)
