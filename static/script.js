@@ -14,17 +14,30 @@ function updateCurrentTime() {
 function showToast(message, type = "info") {
   const toastContainer = document.querySelector(".toast-container");
   const toastElement = document.createElement("div");
-  toastElement.classList.add("toast", `bg-${type}`, "text-white");
+  
+  // Set toast classes based on type
+  let bgClass = "bg-info";
+  if (type === "success") bgClass = "bg-success";
+  if (type === "danger") bgClass = "bg-danger";
+  if (type === "warning") bgClass = "bg-warning";
+  
+  toastElement.classList.add("toast", bgClass, "text-white", "fade-in");
   toastElement.innerHTML = `
-        <div class="toast-body">
-            ${message}
-            <button type="button" class="btn-close btn-close-white float-end" data-bs-dismiss="toast"></button>
-        </div>
-    `;
+    <div class="toast-body">
+      ${message}
+      <button type="button" class="btn-close btn-close-white float-end" data-bs-dismiss="toast"></button>
+    </div>
+  `;
+  
   toastContainer.appendChild(toastElement);
   const toast = new bootstrap.Toast(toastElement, { delay: 5000 });
   toast.show();
-  toastElement.addEventListener("hidden.bs.toast", () => toastElement.remove());
+  
+  // Remove toast element after it's hidden
+  toastElement.addEventListener("hidden.bs.toast", () => {
+    toastElement.classList.add("fade-out");
+    setTimeout(() => toastElement.remove(), 300);
+  });
 }
 
 // Format duration in seconds to human readable format
@@ -66,7 +79,11 @@ function updateThemeIcon(isDark) {
   // Add a transition class before changing the icon
   icon.style.opacity = "0";
   setTimeout(() => {
-    icon.className = isDark ? "bi bi-moon-stars-fill" : "bi bi-sun-fill";
+    if (isDark) {
+      icon.classList.replace("bi-sun-fill", "bi-moon-stars-fill");
+    } else {
+      icon.classList.replace("bi-moon-stars-fill", "bi-sun-fill");
+    }
     icon.style.opacity = "1";
   }, 150);
 }
@@ -89,10 +106,12 @@ async function updateActiveEvaluations() {
       if (!emptyState) {
         container.innerHTML = `
           <div id="emptyEvaluationState" class="empty-state text-center">
-            <div class="empty-state-icon mb-3">🌬️</div>
+            <div class="empty-state-icon mb-3">👏</div>
             <h5>No Quizzes are being evaluated</h5>
+            <p class="text-muted">Active evaluations will appear here</p>
           </div>`;
       }
+      document.getElementById("activeEvalCount").textContent = "0 Active";
       return;
     }
 
@@ -105,6 +124,7 @@ async function updateActiveEvaluations() {
     const fragment = document.createDocumentFragment();
 
     // Get status for each active worker's quiz
+    let activeCount = 0;
     for (const worker of activeWorkers) {
       const quizId = worker.current_job.quiz_id;
       try {
@@ -115,6 +135,7 @@ async function updateActiveEvaluations() {
           continue;
         }
 
+        activeCount++;
         const progress = statusData.progress || 0;
         const existingCard = container.querySelector(
           `[data-quiz-id="${quizId}"]`
@@ -162,9 +183,14 @@ async function updateActiveEvaluations() {
             <div class="card-content">
               <div class="d-flex justify-content-between align-items-center mb-2">
                 <h6 class="mb-0">Quiz ID: ${quizId}</h6>
-                <span class="badge bg-primary status-badge">
-                  ${statusData.current_phase || "evaluating"}
-                </span>
+                <div class="d-flex align-items-center gap-2">
+                  <span class="badge bg-primary status-badge">
+                    ${statusData.current_phase || "evaluating"}
+                  </span>
+                  <button class="btn btn-sm btn-outline-danger stop-btn" onclick="stopJob('${quizId}')">
+                    <i class="bi bi-stop-circle"></i>
+                  </button>
+                </div>
               </div>
               <div class="progress mb-2">
                 <div class="progress-bar" role="progressbar" style="width: ${progress}%" 
@@ -197,8 +223,13 @@ async function updateActiveEvaluations() {
       }
     }
 
+    // Update active count
+    document.getElementById("activeEvalCount").textContent = `${activeCount} Active`;
+
     // Remove cards for completed evaluations
     Array.from(container.children).forEach((card) => {
+      if (card.id === "emptyEvaluationState") return;
+      
       const quizId = card.dataset.quizId;
       if (
         !activeWorkers.some(
@@ -265,6 +296,16 @@ function updateQueueInfo(queueInfo) {
 
 function updateQueuedJobs(jobs) {
   const tbody = document.getElementById("queuedJobsList");
+  
+  if (jobs.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" class="text-center text-muted py-4">No queued jobs</td>
+      </tr>
+    `;
+    return;
+  }
+  
   tbody.innerHTML = jobs
     .map(
       (job) => `
@@ -291,6 +332,16 @@ function updateQueuedJobs(jobs) {
 
 function updateFailedJobs(jobs) {
   const tbody = document.getElementById("failedJobsList");
+  
+  if (jobs.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="4" class="text-center text-muted py-4">No failed jobs</td>
+      </tr>
+    `;
+    return;
+  }
+  
   tbody.innerHTML = jobs
     .map(
       (job) => `
@@ -309,6 +360,16 @@ function updateFailedJobs(jobs) {
 
 function updateCompletedJobs(jobs) {
   const tbody = document.getElementById("completedJobsList");
+  
+  if (jobs.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="4" class="text-center text-muted py-4">No completed jobs</td>
+      </tr>
+    `;
+    return;
+  }
+  
   tbody.innerHTML = jobs
     .map(
       (job) => `
@@ -326,18 +387,21 @@ function updateCompletedJobs(jobs) {
 }
 
 // Kill worker function
-async function killWorker(pid) {
+async function killWorker(pid, mode = "graceful", spawnReplacement = true) {
   try {
     const response = await fetch(`/workers/kill/${pid}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ spawn_replacement: true }),
+      body: JSON.stringify({ 
+        mode: mode,
+        spawn_replacement: spawnReplacement 
+      }),
     });
 
     if (!response.ok) throw new Error("Failed to kill worker");
 
     const result = await response.json();
-    showToast(`Worker ${pid} terminated successfully`, "success");
+    showToast(`Worker ${pid} ${mode === "graceful" ? "gracefully shutting down" : "terminated"} successfully`, "success");
     if (result.replacement_worker) {
       showToast(
         `New worker spawned with PID: ${result.replacement_worker.pid}`,
@@ -586,6 +650,8 @@ function updateWorkerList(workers) {
 
   // Remove workers that no longer exist
   Array.from(workerList.children).forEach((workerElement) => {
+    if (workerElement.classList.contains("empty-state")) return;
+    
     const pid = workerElement.dataset.pid;
     if (!workers.some((w) => w.pid.toString() === pid)) {
       workerElement.classList.add("fade-out");
@@ -604,6 +670,26 @@ function updateDashboardStats(jobsSummary) {
   document.getElementById("activeEvalCount").textContent = `${
     jobsSummary.active || 0
   } Active`;
+}
+
+// Show kill worker modal
+function showKillWorkerModal(pid, hasActiveJob) {
+  currentWorkerPid = pid;
+  document.getElementById("workerPidDisplay").textContent = pid;
+
+  // Enable/disable and set default options based on job status
+  const immediateOption = document.getElementById("killImmediately");
+  const gracefulOption = document.getElementById("killGracefully");
+
+  if (hasActiveJob) {
+    immediateOption.disabled = false;
+    gracefulOption.checked = true;
+  } else {
+    immediateOption.disabled = false;
+    immediateOption.checked = true;
+  }
+
+  killWorkerModal.show();
 }
 
 // Initialize the dashboard
@@ -656,61 +742,18 @@ function initDashboard() {
         document.getElementById("spawnReplacement").checked;
 
       try {
-        const response = await fetch(`/workers/kill/${currentWorkerPid}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            mode: killOption,
-            spawn_replacement: spawnReplacement,
-          }),
-        });
-
-        if (!response.ok) throw new Error("Failed to kill worker");
-
-        const result = await response.json();
-        showToast(
-          `Worker ${currentWorkerPid} ${
-            killOption === "graceful"
-              ? "gracefully shutting down"
-              : "terminated"
-          } successfully`,
-          "success"
-        );
-
-        if (result.replacement_worker) {
-          showToast(
-            `New worker spawned with PID: ${result.replacement_worker.pid}`,
-            "info"
-          );
-        }
-
+        await killWorker(currentWorkerPid, killOption, spawnReplacement);
         killWorkerModal.hide();
-        updateWorkerStatus();
       } catch (error) {
-        console.error("Error killing worker:", error);
-        showToast(`Failed to kill worker ${currentWorkerPid}`, "danger");
+        console.error("Error in kill worker confirmation:", error);
       }
     });
 }
 
-function showKillWorkerModal(pid, hasActiveJob) {
-  currentWorkerPid = pid;
-  document.getElementById("workerPidDisplay").textContent = pid;
-
-  // Enable/disable and set default options based on job status
-  const immediateOption = document.getElementById("killImmediately");
-  const gracefulOption = document.getElementById("killGracefully");
-
-  if (hasActiveJob) {
-    immediateOption.disabled = false;
-    gracefulOption.checked = true;
-  } else {
-    immediateOption.disabled = false;
-    immediateOption.checked = true;
-  }
-
-  killWorkerModal.show();
-}
-
 // Start the dashboard when the page loads
 document.addEventListener("DOMContentLoaded", initDashboard);
+
+// Make functions available globally
+window.stopJob = stopJob;
+window.showKillWorkerModal = showKillWorkerModal;
+window.killWorker = killWorker;

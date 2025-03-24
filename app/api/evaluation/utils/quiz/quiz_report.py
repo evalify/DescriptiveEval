@@ -80,6 +80,11 @@ async def generate_quiz_report(
     question_stats = []
     for question in questions:
         question_id = question["_id"]
+        for result in quiz_results:
+            if not result["responses"].get(question_id, {}).get("score", 0):
+                raise EvaluationError(
+                    f"Question {question_id} does not have a mark assigned for student {result['studentId']}"
+                )
         try:
             correct = sum(
                 1

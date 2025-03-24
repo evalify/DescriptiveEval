@@ -5,6 +5,7 @@
     --danger-color: #e02424;
     --warning-color: #faca15;
     --info-color: #60a5fa;
+    --transition-speed: 0.3s;
 }
 
 [data-theme="light"] {
@@ -103,7 +104,7 @@
 body {
     background-color: var(--bg-primary);
     color: var(--text-primary);
-    transition: background-color 0.3s ease;
+    transition: background-color var(--transition-speed) ease;
     padding-bottom: 2rem;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
 }
@@ -115,6 +116,7 @@ body {
     min-height: 64px;
     display: flex;
     align-items: center;
+    transition: background-color var(--transition-speed) ease, border-color var(--transition-speed) ease;
 }
 
 .navbar .container-fluid {
@@ -128,9 +130,10 @@ body {
     border: 1px solid var(--border-color);
     box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
     border-radius: 0.75rem;
-    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, background-color var(--transition-speed) ease, border-color var(--transition-speed) ease;
     transform: translate3d(0, 0, 0);
     backface-visibility: hidden;
+    overflow: hidden;
 }
 
 .card:hover {
@@ -142,14 +145,16 @@ body {
     background-color: var(--card-bg);
     border-bottom: 1px solid var(--border-color);
     padding: 1rem 1.5rem;
+    transition: background-color var(--transition-speed) ease, border-color var(--transition-speed) ease;
 }
 
 .card-body {
-    padding: 0;
+    padding: 1.25rem;
 }
 
 .nav-tabs {
     border-bottom: none;
+    margin-bottom: 1.5rem;
 }
 
 .nav-tabs .nav-link {
@@ -169,11 +174,17 @@ body {
 .nav-tabs .nav-link.active {
     background-color: var(--primary-color);
     color: white;
+    font-weight: 500;
 }
 
-/* Remove the counters from tab headers */
-.nav-tabs .badge {
-    display: none;
+.nav-pills .nav-link {
+    border-radius: 0.5rem;
+    padding: 0.5rem 1rem;
+    transition: all 0.2s ease;
+}
+
+.nav-pills .nav-link.active {
+    background-color: var(--primary-color);
 }
 
 .worker-list, .evaluation-list {
@@ -181,7 +192,7 @@ body {
     overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: var(--primary-color) var(--bg-secondary);
-    padding: 1rem;
+    padding: 0.5rem;
     min-height: 350px;
     position: relative;
     -webkit-overflow-scrolling: touch;
@@ -189,19 +200,6 @@ body {
 }
 
 /* Custom scrollbar styling with fallbacks */
-.worker-list, .evaluation-list {
-    overflow-y: auto;
-    
-    /* Standard scrollbar styling */
-    -webkit-scrollbar-width: thin;
-    scrollbar-width: thin;
-    
-    /* Scrollbar colors */
-    -webkit-scrollbar-color: var(--primary-color) var(--bg-secondary);
-    scrollbar-color: var(--primary-color) var(--bg-secondary);
-}
-
-/* Improved scrollbar styling for webkit browsers as fallback */
 .worker-list::-webkit-scrollbar,
 .evaluation-list::-webkit-scrollbar,
 .test-results-pre::-webkit-scrollbar {
@@ -221,41 +219,6 @@ body {
 .test-results-pre::-webkit-scrollbar-thumb {
     background: var(--primary-color);
     border-radius: 3px;
-}
-
-/* Add fallback for browsers that don't support custom properties */
-@supports not (color: var(--primary-color)) {
-    .worker-list::-webkit-scrollbar-thumb,
-    .evaluation-list::-webkit-scrollbar-thumb,
-    .test-results-pre::-webkit-scrollbar-thumb {
-        background: #4361ee;
-    }
-    
-    .worker-list::-webkit-scrollbar-track,
-    .evaluation-list::-webkit-scrollbar-track,
-    .test-results-pre::-webkit-scrollbar-track {
-        background: #f3f4f6;
-    }
-}
-
-/* Mobile touch scrolling fallback */
-@supports (-webkit-overflow-scrolling: touch) {
-    .worker-list,
-    .evaluation-list,
-    .test-results-pre {
-        overflow-y: scroll;
-        -webkit-overflow-scrolling: touch;
-    }
-}
-
-/* Fallback for browsers without custom scrollbars */
-@supports not (scrollbar-width: thin) {
-    .worker-list,
-    .evaluation-list,
-    .test-results-pre {
-        overflow-y: auto;
-        scrollbar-width: auto;
-    }
 }
 
 .worker-item, .evaluation-card {
@@ -313,10 +276,16 @@ body {
     border: 1px solid var(--border-color);
     border-radius: 0.75rem;
     opacity: 1 !important;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.toast-body {
+    padding: 0.75rem 1rem;
 }
 
 .table {
     color: var(--text-primary);
+    margin-bottom: 0;
 }
 
 .table > :not(caption) > * > * {
@@ -459,44 +428,6 @@ body {
     box-shadow: 0 0 0 2px var(--primary-color);
 }
 
-.theme-switch input {
-    opacity: 0;
-    width: 0;
-    height: 0;
-}
-
-.theme-switch-slider {
-    position: absolute;
-    cursor: pointer;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background-color: var(--bg-secondary);
-    transition: .4s;
-    border-radius: 1.75rem;
-}
-
-.theme-switch-slider:before {
-    position: absolute;
-    content: "";
-    height: 1.25rem;
-    width: 1.25rem;
-    left: 0.25rem;
-    bottom: 0.25rem;
-    background-color: var(--primary-color);
-    transition: .4s;
-    border-radius: 50%;
-}
-
-.theme-switch input:checked + .theme-switch-slider:before {
-    transform: translateX(1.25rem);
-}
-
-[data-theme="dark"] .theme-switch i {
-    transform: rotateZ(360deg) scale(0.9);
-}
-
 /* Animations */
 @keyframes fadeIn {
     from { opacity: 0; transform: translateY(10px); }
@@ -525,10 +456,10 @@ body *,
 .form-control,
 .nav-link,
 .table {
-    transition: background-color 0.3s ease, 
-                color 0.3s ease, 
-                border-color 0.3s ease, 
-                box-shadow 0.3s ease;
+    transition: background-color var(--transition-speed) ease, 
+                color var(--transition-speed) ease, 
+                border-color var(--transition-speed) ease, 
+                box-shadow var(--transition-speed) ease;
 }
 
 .brand-title {
@@ -567,6 +498,7 @@ body *,
     background-color: var(--card-bg);
     border-color: var(--border-color);
     border-radius: 0.75rem;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
 }
 
 .modal-header {
@@ -610,7 +542,6 @@ body *,
     background-color: var(--bg-secondary);
     border: 1px solid var(--border-color);
     transition: all 0.2s ease;
-    transition: opacity 0.2s ease, background-color 0.2s ease;
 }
 
 .form-check:hover {
@@ -661,78 +592,27 @@ body *,
     background-color: var(--bg-primary);
 }
 
-/* Global transition for theme changes */
-*, *::before, *::after {
-    transition: background-color 0.3s ease,
-                color 0.3s ease,
-                border-color 0.3s ease,
-                box-shadow 0.3s ease,
-                opacity 0.3s ease;
-}
-
-/* Theme transition improvements */
-body, .card, .navbar, .modal-content, .form-control, .btn {
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Improve button and input transitions */
-.btn, .form-control, .form-select {
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Shadow transitions */
-.card, .modal-content {
-    transition: transform 0.2s ease,
-                box-shadow 0.2s ease,
-                background-color 0.3s ease,
-                border-color 0.3s ease;
-}
-
-/* Queue Info Styling */
-.queue-summary-card {
+/* Summary cards */
+.summary-card {
     transition: transform 0.2s ease, box-shadow 0.2s ease;
+    min-height: 120px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
 }
 
-.queue-summary-card:hover {
-    transform: translateY(-2px);
+.summary-card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 15px 25px -10px rgba(0, 0, 0, 0.1);
 }
 
-/* Job Status Badges */
-.badge.bg-secondary {
-    background-color: var(--secondary-color) !important;
+.summary-card .card-title {
+    font-size: 2.5rem;
+    font-weight: 700;
+    margin-bottom: 0.5rem;
 }
 
-/* Worker Status Improvements */
-.worker-item .btn-icon {
-    opacity: 0.8;
-    transition: opacity 0.2s ease;
-}
-
-.worker-item:hover .btn-icon {
-    opacity: 1;
-}
-
-.worker-item .current-job-info {
-    background-color: var(--bg-secondary);
-    border-radius: 0.5rem;
-    padding: 0.75rem;
-    margin-top: 1rem;
-}
-
-.worker-item.evaluating .current-job-info {
-    border-left: 3px solid var(--primary-color);
-}
-
-/* Table Improvements */
-.table td {
-    vertical-align: middle;
-}
-
-.table tr {
-    transition: background-color 0.2s ease;
-}
-
-/* Add missing style for test results pre tag */
+/* Test results pre tag */
 .test-results-pre {
     max-height: 400px;
     overflow-y: auto;
@@ -748,22 +628,31 @@ body, .card, .navbar, .modal-content, .form-control, .btn {
     border: 1px solid var(--border-color);
 }
 
-.card-title {
-    font-size: 2rem;
-    margin-bottom: 0.5rem;
-}
-
-/* Center the card title value */
-.card-title {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100%;
-}
-
-.card.text-center .card-title {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    height: 100%;
+/* Responsive improvements */
+@media (max-width: 768px) {
+    .card-header {
+        padding: 0.75rem 1rem;
+    }
+    
+    .card-body {
+        padding: 1rem;
+    }
+    
+    .worker-list, .evaluation-list {
+        height: 300px;
+    }
+    
+    .summary-card {
+        min-height: 100px;
+        margin-bottom: 1rem;
+    }
+    
+    .summary-card .card-title {
+        font-size: 2rem;
+    }
+    
+    .nav-tabs .nav-link {
+        padding: 0.5rem 0.75rem;
+        font-size: 0.9rem;
+    }
 }
