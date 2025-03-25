@@ -81,7 +81,7 @@ async def generate_quiz_report(
     for question in questions:
         question_id = question["_id"]
         for result in quiz_results:
-            if not result["responses"].get(question_id, {}).get("score", 0):
+            if result["responses"].get(question_id, {}).get("score", 0) is None:
                 raise EvaluationError(
                     f"Question {question_id} does not have a mark assigned for student {result['studentId']}"
                 )

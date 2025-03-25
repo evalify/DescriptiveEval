@@ -96,9 +96,12 @@ async def get_evaluation_status(
             else:
                 # For EVALUATED, UNEVALUATED
                 cursor, _ = get_postgres_cursor()
-                quiz_queue_status = get_quiz_isevaluated(cursor, quiz_id).get(
-                    "isEvaluated"
-                )
+                db_query = get_quiz_isevaluated(cursor, quiz_id)
+
+                if db_query is None:
+                    quiz_queue_status = "UNKNOWN"
+                else:
+                    quiz_queue_status = db_query.get("isEvaluated")
                 cursor.close()
 
             if quiz_queue_status is None:
