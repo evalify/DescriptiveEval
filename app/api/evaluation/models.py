@@ -1,5 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional, Dict, List
+from pydantic import Field
 
 
 class EvalRequest(BaseModel):
@@ -18,4 +19,7 @@ class EvalRequest(BaseModel):
 
 class ReEvalRequest(EvalRequest):
     student_ids: List[str]
-    # question_ids : List[str] # Also make above optional
+    override_evaluated: Optional[bool] = Field(
+        default=None, exclude=True
+    )  # This field is excluded from the model
+    # question_ids: Optional[List[str]] = None  # Also make above optional

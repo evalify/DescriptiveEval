@@ -28,7 +28,7 @@ from app.core.exceptions import (
     InvalidQuestionError,
     DatabaseConnectionError,
     EvaluationError,
-    ResponseQuestionMismatchError,
+    # ResponseQuestionMismatchError,
 )
 from app.core.logger import logger, QuizLogger
 from app.config.constants import (
@@ -232,7 +232,19 @@ async def bulk_evaluate_quiz_responses(
                 valid_question_ids = {str(q["_id"]) for q in questions}
                 invalid_questions = response_question_ids - valid_question_ids
                 if invalid_questions:
-                    raise ResponseQuestionMismatchError(quiz_id, invalid_questions)
+                    # raise ResponseQuestionMismatchError(quiz_id, invalid_questions)
+                    logger.warning(
+                        "Response contains invalid questions: some questions provided do not match any quiz questions."
+                    )
+
+                    # Set invalid questions' score to zero in student response
+                    for question_id in invalid_questions:
+                        if (
+                            isinstance(quiz_result["responses"][question_id], dict)
+                            and "score" in quiz_result["responses"][question_id]
+                        ):
+                            quiz_result["responses"][question_id]["score"] = 0
+
                 # phase_times["validation"] = time.monotonic() - validation_start
                 update_progress(
                     redis_client, quiz_id, progress_bar, qlogger, "validation"
