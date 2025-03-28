@@ -1,4 +1,4 @@
-// Update interval in milliseconds
+ // Update interval in milliseconds
 const UPDATE_INTERVAL = 5000;
 
 // Store active evaluations
@@ -420,7 +420,7 @@ async function killWorker(pid, mode = "graceful", spawnReplacement = true) {
 // Stop job function
 async function stopJob(quizId) {
   try {
-    const response = await fetch(`/jobs/stop/${quizId}`, {
+    const response = await fetch(`/workers/jobs/stop/${quizId}`, {
       method: "POST",
     });
 
@@ -680,14 +680,20 @@ function showKillWorkerModal(pid, hasActiveJob) {
   // Enable/disable and set default options based on job status
   const immediateOption = document.getElementById("killImmediately");
   const gracefulOption = document.getElementById("killGracefully");
+  const spawnReplacementOption = document.getElementById(
+    "spawnReplacement"
+  );
+  spawnReplacementOption.checked = true; // Default to true
+  spawnReplacementOption.disabled = true; // FIXME: Implement this
+  gracefulOption.disabled = true;
+  immediateOption.disabled = false; // Always enabled
+  immediateOption.checked = true; // Default to false
 
-  if (hasActiveJob) {
-    immediateOption.disabled = false;
-    gracefulOption.checked = true;
-  } else {
-    immediateOption.disabled = false;
-    immediateOption.checked = true;
-  }
+  // if (hasActiveJob) {
+  //   gracefulOption.checked = true;
+  // } else {
+  //   immediateOption.checked = true;
+  // }
 
   killWorkerModal.show();
 }

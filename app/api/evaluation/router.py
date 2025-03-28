@@ -203,6 +203,7 @@ async def evaluate_bulk_queue(
             request.types_to_evaluate,
             request.override_cache,
             job_timeout=WORKER_TTL,
+            result_ttl=-1,
         )
         logger.info(
             f"[{trace_id}] Successfully queued evaluation job. Job ID: {job.id}"

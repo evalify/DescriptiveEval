@@ -473,6 +473,7 @@ class ResponseEvaluator:
         student_answer = QuizResponseSchema.get_attribute(
             quiz_result, qid, "student_answer"
         )[0]
+        llm_start_time = datetime.now()
         if await direct_match(
             student_answer, question["expectedAnswer"], strip=True, case_sensitive=False
         ):
@@ -549,6 +550,24 @@ class ResponseEvaluator:
                         "breakdown": "Evaluation failed after maximum retries",
                         "status": EvaluationStatus.LLM_ERROR,
                     }
+
+                raise LLMEvaluationError(
+                    qid,
+                    errors,
+                    MAX_RETRIES,
+                    {
+                        "evaluationStatus": score_res.get(
+                            "status", EvaluationStatus.LLM_ERROR
+                        ).value,
+                        "evaluationMethod": "llm",
+                        "llmProvider": current_llm.__class__.__name__,
+                        "evaluationAttempts": attempt + 1
+                        if "attempt" in locals()
+                        else 0,
+                        "errors": errors if errors else None,
+                        "duration": (datetime.now() - llm_start_time).total_seconds(),
+                    },
+                )
 
             # self._update_response_metadata(
             #     response_id,
