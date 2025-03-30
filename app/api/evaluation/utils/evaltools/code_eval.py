@@ -8,6 +8,7 @@ from typing import Tuple
 import requests
 from dotenv import load_dotenv
 from app.core.logger import logger
+from app.core.exceptions import InvalidQuestionError
 
 load_dotenv()
 
@@ -26,6 +27,12 @@ async def evaluate_coding_question(
     :param driver_code: Driver code to run the student's code
     :param test_cases_count: Number of test cases that are in the driver code for validation (optional)
     """
+    if test_cases_count == 0:
+        # Infer test cases count from the driver code
+        test_cases_count = driver_code.count("successful!")
+        if test_cases_count == 0:
+            raise InvalidQuestionError("No Test Cases are present in driver code")
+
     if not student_response:
         logger.warning("No response submitted")
         return 0, test_cases_count, ""

@@ -163,6 +163,17 @@ async def bulk_evaluate_quiz_responses(
             qlogger.error(f"Failed to fetch quiz data: {str(e)}")
             raise DatabaseConnectionError(f"Failed to fetch quiz data: {str(e)}")
 
+        # Handle old schema conversion - globally
+        for quiz_result in quiz_responses:
+            for question in questions:
+                qid = question["_id"]
+                if isinstance(quiz_result["responses"].get(qid), list):
+                    quiz_result["responses"][qid] = {
+                        "student_answer": quiz_result["responses"][qid],
+                    }
+            if "questionMarks" in quiz_result:
+                del quiz_result["questionMarks"]
+
         # Validate quiz setup
         await validate_quiz_setup(quiz_id, questions, quiz_responses)
 

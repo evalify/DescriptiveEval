@@ -81,6 +81,12 @@ async def generate_quiz_report(
     for question in questions:
         question_id = question["_id"]
         for result in quiz_results:
+            if isinstance(result["responses"].get(question_id), list):
+                raise EvaluationError(
+                    f"Response is unevaluated for at least one student {result['studentId']}\n"
+                    f"Responses are in their original (unevaluated) schema\n"
+                    f"This is usually a mild cascade error, check the evaluation for errors"
+                )
             if result["responses"].get(question_id, {}).get("score", 0) is None:
                 raise EvaluationError(
                     f"Question {question_id} does not have a mark assigned for student {result['studentId']}"

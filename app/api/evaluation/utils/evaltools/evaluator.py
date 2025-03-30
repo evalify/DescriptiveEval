@@ -274,6 +274,11 @@ class ResponseEvaluator:
                 self.qlogger.info(
                     f"Skipping evaluation for question {qid} of type {question_type}"
                 )
+
+                # Set score to zero if score is not already set
+                if QuizResponseSchema.get_attribute(quiz_result, qid, "score") is None:
+                    QuizResponseSchema.set_attribute(quiz_result, qid, "score", 0)
+
                 continue
 
             # Evaluate question based on type
