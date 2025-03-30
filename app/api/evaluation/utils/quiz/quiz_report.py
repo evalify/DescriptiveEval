@@ -38,8 +38,11 @@ from typing import Any, Dict, List
 
 from app.core.logger import QuizLogger
 from app.utils.misc import save_quiz_data
-from app.config.constants import MAX_RETRIES
+from app.config.constants import DB_MAX_RETRIES
 from app.core.exceptions import EvaluationError
+import psycopg2
+from psycopg2.errors import QueryCanceledError
+from app.database.postgres import get_db_connection_no_context
 
 
 async def generate_quiz_report(
@@ -155,59 +158,126 @@ async def save_quiz_report(
     :param save_to_file: Whether to save to a file (default: True)
     """
     qlogger = QuizLogger(quiz_id)
+    timeout = 30  # seconds
     retries = 0
+    max_retries = DB_MAX_RETRIES
 
-    while retries < MAX_RETRIES:
+    new_cursor = False
+    while retries < max_retries:
         try:
+            if retries == max_retries - 1:
+                # At last retry, get a new connection
+                qlogger.warning(
+                    f"Retrying to get a new connection for quiz report {quiz_id} (attempt {retries + 1})"
+                )
+                cursor, conn = get_db_connection_no_context()
+                new_cursor = True
+
+            # Set statement timeout at session level
+            cursor.execute("SET LOCAL statement_timeout = %s", (timeout * 1000,))
+
             # Save to database
             qlogger.debug("Attempting to save report to database")
-            await asyncio.to_thread(
-                cursor.execute,
-                """INSERT INTO "QuizReport" (
-                    "id", "quizId", "maxScore", "avgScore", "minScore", 
-                    "totalScore", "totalStudents", "questionStats", "markDistribution", "evaluatedAt"
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
-                ON CONFLICT ("quizId") 
-                DO UPDATE SET 
-                    "maxScore" = EXCLUDED."maxScore",
-                    "avgScore" = EXCLUDED."avgScore",
-                    "minScore" = EXCLUDED."minScore",
-                    "totalScore" = EXCLUDED."totalScore",
-                    "totalStudents" = EXCLUDED."totalStudents",
-                    "questionStats" = EXCLUDED."questionStats",
-                    "markDistribution" = EXCLUDED."markDistribution",
-                    "evaluatedAt" = NOW()
-                """,
-                (
-                    uuid.uuid4().hex,
-                    quiz_id,
-                    report["maxScore"],
-                    report["avgScore"],
-                    report["minScore"],
-                    report["totalScore"],
-                    report["totalStudents"],
-                    json.dumps(report["questionStats"]),
-                    json.dumps(report["markDistribution"]),
-                ),
-            )
-            await asyncio.to_thread(conn.commit)
+            async with asyncio.timeout(timeout):
+                await asyncio.to_thread(
+                    cursor.execute,
+                    """INSERT INTO "QuizReport" (
+                        "id", "quizId", "maxScore", "avgScore", "minScore", 
+                        "totalScore", "totalStudents", "questionStats", "markDistribution", "evaluatedAt"
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                    ON CONFLICT ("quizId") 
+                    DO UPDATE SET 
+                        "maxScore" = EXCLUDED."maxScore",
+                        "avgScore" = EXCLUDED."avgScore",
+                        "minScore" = EXCLUDED."minScore",
+                        "totalScore" = EXCLUDED."totalScore",
+                        "totalStudents" = EXCLUDED."totalStudents",
+                        "questionStats" = EXCLUDED."questionStats",
+                        "markDistribution" = EXCLUDED."markDistribution",
+                        "evaluatedAt" = NOW()
+                    """,
+                    (
+                        uuid.uuid4().hex,
+                        quiz_id,
+                        report["maxScore"],
+                        report["avgScore"],
+                        report["minScore"],
+                        report["totalScore"],
+                        report["totalStudents"],
+                        json.dumps(report["questionStats"]),
+                        json.dumps(report["markDistribution"]),
+                    ),
+                )
+                await asyncio.to_thread(conn.commit)
+
             qlogger.info("Quiz report saved to database successfully")
 
             # Save to file if requested
             if save_to_file:
                 save_quiz_data(report, quiz_id, "report")
                 qlogger.debug("Quiz report saved to file")
-            break
+
+            if new_cursor:
+                # Close the new cursor if it was created
+                cursor.close()
+                conn.close()
+
+            return
+
+        except (asyncio.TimeoutError, QueryCanceledError):
+            retries += 1
+            qlogger.warning(
+                f"Operation timed out/cancelled for quiz report {quiz_id} (attempt {retries}/{max_retries})"
+            )
+            if retries == max_retries:
+                qlogger.error(f"Max retries reached for updating quiz report {quiz_id}")
+                raise
+            wait_time = 2**retries
+            await asyncio.sleep(wait_time)
+
+        # Errors that require a new connection but not backoff
+        except (psycopg2.InterfaceError, psycopg2.ProgrammingError):
+            # Cursor is closed, get a new connection
+            qlogger.warning(
+                f"Cursor closed for quiz report {quiz_id} (attempt {retries + 1})"
+            )
+            cursor, conn = get_db_connection_no_context()
+            new_cursor = True
+            retries += 1
+            if retries == max_retries:
+                qlogger.error(
+                    f"Max retries reached for updating quiz report {quiz_id}",
+                    exc_info=True,
+                )
+                raise
+
+        # For operational/database errors - add backoff
+        except (psycopg2.OperationalError, psycopg2.DatabaseError) as e:
+            retries += 1
+            qlogger.error(
+                f"Op/Db Error for quiz report {quiz_id}: {str(e)} - retry {retries}/{max_retries}"
+            )
+            if retries == max_retries:
+                qlogger.error(f"Max retries reached for updating quiz report {quiz_id}")
+                raise
+            wait_time = 2**retries  # Add exponential backoff for these errors
+            await asyncio.sleep(wait_time)
 
         except Exception as e:
             retries += 1
-            if retries == MAX_RETRIES:
-                qlogger.error(
-                    f"Failed to save quiz report after {MAX_RETRIES} retries: {str(e)}"
-                )
-                raise
-            wait_time = 2**retries  # Exponential backoff: 2,4,8 seconds
-            qlogger.warning(
-                f"Retrying database update in {wait_time} seconds... (Attempt {retries}/{MAX_RETRIES})"
+            qlogger.error(
+                f"Error updating quiz report {quiz_id}: {str(e)} - retry {retries}/{max_retries}"
             )
+            if retries == max_retries:
+                qlogger.error(f"Max retries reached for updating quiz report {quiz_id}")
+                raise
+            wait_time = 1  # Add a fixed wait time for other errors
             await asyncio.sleep(wait_time)
+
+        finally:
+            # Ensure connection is in a clean state
+            try:
+                if conn.status != psycopg2.extensions.STATUS_READY:
+                    conn.rollback()
+            except Exception:
+                pass
