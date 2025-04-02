@@ -422,10 +422,18 @@ async def bulk_evaluate_quiz_responses(
             batch_times = []
 
             # Process responses in batches
-            for i in range(0, total_responses, EVAL_BATCH_SIZE):
+            effective_batch_size = (
+                EVAL_BATCH_SIZE
+                if question_count_by_type.get("DESCRIPTIVE", 0)
+                + question_count_by_type.get("FILL_IN_BLANK", 0)
+                > 0
+                else 10 * EVAL_BATCH_SIZE
+            )
+
+            for i in range(0, total_responses, effective_batch_size):
                 # batch_start = time.monotonic()
-                batch = unevaluated_quiz_responses[i : i + EVAL_BATCH_SIZE]
-                batch_number = i // EVAL_BATCH_SIZE + 1
+                batch = unevaluated_quiz_responses[i : i + effective_batch_size]
+                batch_number = i // effective_batch_size + 1
                 qlogger.info(f"Starting batch {batch_number} ({len(batch)} responses)")
 
                 tasks = [
