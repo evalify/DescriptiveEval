@@ -21,8 +21,7 @@ async def get_provider(app=Depends(get_app)):
 
 
 @router.post("/set-provider")
-async def change_provider(request: ProviderRequest):
-    app = get_app(request)
+async def change_provider(request: ProviderRequest, app=Depends(get_app)):
     try:
         provider = LLMProvider(request.provider.lower())
         provider_model_name = request.provider_model_name
