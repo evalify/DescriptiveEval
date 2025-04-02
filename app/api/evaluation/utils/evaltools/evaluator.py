@@ -434,8 +434,14 @@ class ResponseEvaluator:
                 )
 
             QuizResponseSchema.set_attribute(quiz_result, qid, "score", mcq_score)
+            QuizResponseSchema.set_attribute(quiz_result, qid, "negative_score", None)
+
             neg_score = None
-            if self.negative_marking and mcq_score <= 0:
+            if (
+                self.negative_marking
+                and mcq_score <= 0
+                and not len(correct_answers) > 1
+            ):
                 neg_score = question.get("negativeMark", -question_total_score / 2)
                 QuizResponseSchema.set_attribute(
                     quiz_result, qid, "negative_score", neg_score
@@ -729,6 +735,7 @@ class ResponseEvaluator:
                 response[0], correct_answer, question_total_score
             )
             QuizResponseSchema.set_attribute(quiz_result, qid, "score", tf_score)
+            QuizResponseSchema.set_attribute(quiz_result, qid, "negative_score", None)
             neg_score = None
             if self.negative_marking and tf_score <= 0:
                 neg_score = question.get("negativeMark", -question_total_score / 2)
