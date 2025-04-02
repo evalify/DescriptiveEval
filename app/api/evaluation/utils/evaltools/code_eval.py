@@ -93,10 +93,31 @@ def cleanCode(code: str, language_id) -> str:
         return cleanCode_octave(code)
     elif language_id == JUDGE_LANGUAGE_MAP["python"]:
         return cleanCode_python(code)
+    elif language_id == JUDGE_LANGUAGE_MAP["java"]:
+        return cleanCode_java(code)
     else:
         raise ValueError(
             f"Unsupported language ID {language_id}. Supported IDs are {JUDGE_LANGUAGE_MAP}"
         )
+
+
+def cleanCode_java(code: str) -> str:
+    """
+    This function cleans the code by removing all print statements
+    :param code: Raw code
+    :return: Cleaned code
+    """
+    # Regex pattern to match print statements
+    print_pattern = r"^\s*System\.out\.(?:print(?:ln)?|printf)\s*\(.*?\)\s*;?\s*$"
+
+    # Function to comment out lines that will lead to printing
+    def comment_out_prints(match):
+        return f"// {match.group(0)}"  # Comment out the entire line
+
+    # Comment out all printing lines
+    code = re.sub(print_pattern, comment_out_prints, code, flags=re.MULTILINE)
+
+    return code
 
 
 def cleanCode_python(code: str) -> str:

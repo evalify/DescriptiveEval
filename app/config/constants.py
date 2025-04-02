@@ -44,6 +44,7 @@ JUDGE_URL = os.getenv("JUDGE_API")
 JUDGE_LANGUAGE_MAP = {
     "python": 71,
     "octave": 66,
+    "java": 62,
 }
 
 
