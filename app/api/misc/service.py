@@ -50,9 +50,80 @@ def populate_course_sheet(
             course_code[:30] if course_code else course_id[:30]
         )  # Excel sheet name limit is 31 characters
 
-    # Write student data to sheet, starting from row 12 to leave space for headers
-    df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=11)
-    logger.debug("Student data written to Excel sheet.")
+    # ----- CALCULATE PERCENTAGES AND CREATE COMBINED DATAFRAME -----
+    quiz_details = report_data["quiz_details"]
+
+    # Create DataFrame for percentages (with the same quiz IDs as column names)
+    percent_df = pd.DataFrame(index=df.index)
+
+    # Create a dictionary to store the numerical percentage values for sorting
+    percentage_values = {}
+
+    # Calculate percentages for each quiz
+    for quizId in quiz_details:
+        total_score = quiz_details[quizId]["totalScore"]
+        if total_score and total_score > 0:  # Avoid division by zero
+            # Calculate regular percentages as numerical values (not strings)
+            percent_df[f"{quizId} %"] = df[quizId].apply(
+                lambda score: score / total_score
+                if score != 0 or pd.notna(score)
+                else 0
+            )
+
+            # Store numerical percentages for sorting (as decimal values, not percentages)
+            percentage_values[quizId] = df[quizId].apply(
+                lambda score: score / total_score
+                if score != 0 or pd.notna(score)
+                else 0
+            )
+        else:
+            # Handle case where total_score is 0 or None
+            percent_df[f"{quizId} %"] = "N/A"
+            percentage_values[quizId] = 0
+
+    # Create DataFrame for sorted percentages (with generic column names)
+    sorted_percent_df = pd.DataFrame(index=df.index)
+
+    # Calculate sorted percentages for each student
+    for idx in range(len(df)):
+        # Get percentage values for this student
+        student_percentages = {
+            quizId: percentage_values[quizId][idx] for quizId in quiz_details
+        }
+
+        # Sort percentages in descending order
+        sorted_percents = sorted(
+            student_percentages.items(), key=lambda x: x[1], reverse=True
+        )
+
+        # Add sorted percentages to DataFrame with generic column names (as numerical values)
+        for i, (quizId, value) in enumerate(sorted_percents):
+            # Ordinal names: "Best %", "2nd Best %", "3rd Best %", etc.
+            if i == 0:
+                column_name = "Best %"
+            elif i == 1:
+                column_name = "2nd Best %"
+            elif i == 2:
+                column_name = "3rd Best %"
+            else:
+                column_name = f"{i + 1}th Best %"
+
+            if column_name not in sorted_percent_df.columns:
+                sorted_percent_df[column_name] = 0.0
+            sorted_percent_df.at[idx, column_name] = float(value)
+
+    # Empty df for vertical spacing
+    spacing_df = pd.DataFrame([""] * len(df), columns=["spacing"])
+    spacing_offset = 1  # Offset for other columns that depend on spacing
+
+    # Combine all DataFrames horizontally
+    combined_df = pd.concat([df, spacing_df, percent_df, sorted_percent_df], axis=1)
+
+    # Write the combined DataFrame to Excel
+    combined_df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=11)
+    logger.debug(
+        "Combined data (raw scores, percentages, sorted percentages) written to Excel sheet."
+    )
 
     # Get the worksheet to apply formatting
     workbook = writer.book
@@ -96,16 +167,57 @@ def populate_course_sheet(
         cell.border = Border()  # Remove border for dumped cells
         if cell.value in ["Student Name", "Roll Number"]:
             cell.font = Font(bold=True)
+
+        if "Best" in str(cell.value):
+            cell.font = Font(bold=True, color="FFFFFF")
+            cell.fill = PatternFill(
+                start_color="4F81BD", end_color="4F81BD", fill_type="solid"
+            )
+            cell.alignment = Alignment(
+                wrap_text=True, horizontal="center", vertical="center"
+            )
     logger.debug("Student data headers formatted.")
 
     # Quiz details header section
-    quiz_details = report_data["quiz_details"]
     start_col = 3  # starting from column C
+    quiz_count = len(quiz_details)
 
-    # Place Quiz Titles in row 9 with contrasting style and wrap text enabled
+    # Add section headings for Marks and Percentages (Row 11)
+    # Marks section heading (spans all raw score columns)
+    marks_start_col = get_column_letter(start_col)
+    marks_end_col = get_column_letter(start_col + quiz_count - 1)
+    marks_range = f"{marks_start_col}11:{marks_end_col}11"
+    worksheet.merge_cells(marks_range)
+    worksheet[f"{marks_start_col}11"] = "Marks"  # TODO: Change to marks
+    worksheet[f"{marks_start_col}11"].font = Font(size=14, bold=True)
+    worksheet[f"{marks_start_col}11"].alignment = Alignment(
+        horizontal="center", vertical="center"
+    )
+    worksheet[f"{marks_start_col}11"].fill = PatternFill(
+        start_color="D9E1F2", end_color="D9E1F2", fill_type="solid"
+    )
+
+    # Percentages section heading (spans all percentage and sorted percentage columns)
+    percent_start_col = get_column_letter(start_col + quiz_count + spacing_offset)
+    percent_end_col = get_column_letter(
+        start_col + quiz_count * 3 - 1 + spacing_offset
+    )  # Includes both regular and sorted percentages
+    percent_range = f"{percent_start_col}11:{percent_end_col}11"
+    worksheet.merge_cells(percent_range)
+    worksheet[f"{percent_start_col}11"] = "Percentages"
+    worksheet[f"{percent_start_col}11"].font = Font(size=14, bold=True)
+    worksheet[f"{percent_start_col}11"].alignment = Alignment(
+        horizontal="center", vertical="center"
+    )
+    worksheet[f"{percent_start_col}11"].fill = PatternFill(
+        start_color="D9E1F2", end_color="D9E1F2", fill_type="solid"
+    )
+
+    # Place Quiz Titles in row 8 with contrasting style and wrap text enabled
     for idx, quizId in enumerate(quiz_details, start=start_col):
+        # Original quiz columns
         col_letter = get_column_letter(idx)
-        cell = worksheet[f"{col_letter}9"]
+        cell = worksheet[f"{col_letter}8"]
         cell.value = quiz_details[quizId]["title"]
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill(
@@ -116,26 +228,46 @@ def populate_course_sheet(
             wrap_text=True, horizontal="center", vertical="center"
         )
 
-    # Place Quiz Dates in row 10
+    # Place Quiz Dates in row 9
     for idx, quizId in enumerate(quiz_details, start=start_col):
+        # Original date columns
         col_letter = get_column_letter(idx)
-        worksheet[f"{col_letter}10"] = quiz_details[quizId]["date"]
+        worksheet[f"{col_letter}9"] = quiz_details[quizId]["date"]
+        worksheet[f"{col_letter}9"].font = Font(bold=True)
+        worksheet[f"{col_letter}9"].fill = PatternFill(
+            start_color="FFD966", end_color="FFD966", fill_type="solid"
+        )
+
+    # Place Quiz Total Scores in row 10
+    for idx, quizId in enumerate(quiz_details, start=start_col):
+        # Original total score columns
+        col_letter = get_column_letter(idx)
+        worksheet[f"{col_letter}10"] = f"Total: {quiz_details[quizId]['totalScore']}"
         worksheet[f"{col_letter}10"].font = Font(bold=True)
         worksheet[f"{col_letter}10"].fill = PatternFill(
             start_color="FFD966", end_color="FFD966", fill_type="solid"
         )
-    logger.debug("Quiz dates added to Excel sheet.")
+        worksheet[f"{col_letter}10"].alignment = Alignment(horizontal="left")
 
-    # Place Quiz Total Scores in row 11
-    for idx, quizId in enumerate(quiz_details, start=start_col):
-        col_letter = get_column_letter(idx)
-        worksheet[f"{col_letter}11"] = f"Total: {quiz_details[quizId]['totalScore']}"
-        worksheet[f"{col_letter}11"].font = Font(bold=True)
-        worksheet[f"{col_letter}11"].fill = PatternFill(
-            start_color="FFD966", end_color="FFD966", fill_type="solid"
-        )
-        worksheet[f"{col_letter}11"].alignment = Alignment(horizontal="left")
-    logger.debug("Quiz total scores added to Excel sheet.")
+    # Add header for the sorted percentages section
+    rank_start_col = start_col + quiz_count * 2 + spacing_offset
+    # Apply percentage formatting to percentage columns and sorted percentage columns
+    # Find where percentage columns start
+    percent_start_col_num = start_col + quiz_count + spacing_offset
+
+    # Apply formatting to each row in the percentage columns
+    for row in range(13, 13 + len(df)):  # Start from row 13 (data rows after header)
+        # Format regular percentage columns
+        for i in range(quiz_count):
+            col_letter = get_column_letter(percent_start_col_num + i)
+            cell = worksheet[f"{col_letter}{row}"]
+            cell.number_format = "0.00%"  # Format as percentage with 2 decimal places
+
+        # Format sorted percentage columns
+        for i in range(quiz_count):
+            col_letter = get_column_letter(rank_start_col + i)
+            cell = worksheet[f"{col_letter}{row}"]
+            cell.number_format = "0.00%"  # Format as percentage with 2 decimal places
 
     # Auto-adjust column width
     for col in worksheet.columns:
@@ -143,7 +275,10 @@ def populate_course_sheet(
         column = col[0].column if hasattr(col[0], "column") else col[0].column_letter
         column_letter = get_column_letter(column) if isinstance(column, int) else column
         for cell in col:
-            if cell.value:
+            if cell.value == "spacing":
+                cell.value = ""
+                max_length = 20
+            elif cell.value:
                 max_length = max(max_length, len(str(cell.value)))
         adjusted_width = max_length + 2
         worksheet.column_dimensions[column_letter].width = adjusted_width
@@ -382,7 +517,7 @@ if __name__ == "__main__":
     #     json.dump(report, f, indent=4, cls=DateTimeEncoder)
 
     # Test save_excel_report
-    directory = "data/reports"
+    # directory = "data/reports"
     filename = asyncio.run(generate_excel_report(course_id, save_to_file=True))
 
     # Test generate_excel_class_report
