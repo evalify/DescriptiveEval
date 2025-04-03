@@ -5,7 +5,7 @@ import os
 from datetime import datetime
 
 from app.core.logger import logger
-from .utils import format_date, get_column_letter
+from .utils import format_date, get_column_letter, apply_border_to_range
 from typing import Dict
 
 
@@ -120,7 +120,11 @@ def populate_course_sheet(
     combined_df = pd.concat([df, spacing_df, percent_df, sorted_percent_df], axis=1)
 
     # Write the combined DataFrame to Excel
-    combined_df.to_excel(writer, sheet_name=sheet_name, index=False, startrow=11)
+    df_start_row = 15
+    combined_df.to_excel(
+        writer, sheet_name=sheet_name, index=False, startrow=df_start_row
+    )
+
     logger.debug(
         "Combined data (raw scores, percentages, sorted percentages) written to Excel sheet."
     )
@@ -133,11 +137,19 @@ def populate_course_sheet(
     from openpyxl.styles import Font, Border, PatternFill, Alignment, Side
 
     thin_border = Border(
-            left=Side(style="thin"),
-            right=Side(style="thin"),
-            top=Side(style="thin"),
-            bottom=Side(style="thin"),
-        )
+        left=Side(style="thin"),
+        right=Side(style="thin"),
+        top=Side(style="thin"),
+        bottom=Side(style="thin"),
+    )
+
+    # Set border to thin border for all dumped cells except spacing column
+    n_rows, n_cols = combined_df.shape
+    spacing_column_index = len(df.columns) + 1  # +1 because Excel columns are 1-indexed
+    for r in range(df_start_row + 1, df_start_row + n_rows + 2):
+        for c in range(1, n_cols + 1):
+            if c != spacing_column_index:  # Skip applying border to spacing column
+                worksheet.cell(row=r, column=c).border = thin_border
 
     # Title row: merged cells A1 to H1 for a prominent course title
     worksheet.merge_cells("A1:H1")
@@ -175,18 +187,51 @@ def populate_course_sheet(
     for i, (label, value) in enumerate(summary_data, start=2):
         label_cell = worksheet[f"A{i}"]
         label_cell.value = label
+        label_cell.fill = PatternFill(
+            start_color="FABF8F", end_color="FABF8F", fill_type="solid"
+        )
         label_cell.font = Font(bold=True)
         label_cell.alignment = Alignment(horizontal="left")
+        label_cell.border = thin_border
+
         worksheet[f"B{i}"] = value
+        worksheet[f"B{i}"].fill = PatternFill(
+            start_color="C4BD97", end_color="C4BD97", fill_type="solid"
+        )
+        worksheet[f"B{i}"].alignment = Alignment(horizontal="left")
+        worksheet[f"B{i}"].border = thin_border
+
     logger.debug("Summary data added to Excel sheet.")
 
     # Student data headers (and data) will start from row 12, as defined in df.to_excel
 
     # Make the main headers bold (row 12)
-    for cell in worksheet[12]:  # Row 12 has the student headers
-        cell.border = Border()  # Remove border for dumped cells
+    for cell in worksheet[df_start_row + 1]:  # Row 12 has the student headers
         if cell.value in ["Student Name", "Roll Number"]:
-            cell.font = Font(bold=True)
+            current_value = cell.value
+
+            worksheet.merge_cells(
+                start_row=cell.row - 4,
+                start_column=cell.col_idx,
+                end_row=cell.row,
+                end_column=cell.col_idx,
+            )
+
+            cell = worksheet.cell(
+                row=cell.row - 4,
+                column=cell.col_idx,
+            )
+            cell.value = current_value
+            cell.font = Font(bold=True, size=14)
+            cell.fill = PatternFill(
+                start_color="E6B8B7", end_color="E6B8B7", fill_type="solid"
+            )
+            # Merge with 4 cells above
+            cell.alignment = Alignment(
+                wrap_text=True, horizontal="center", vertical="center"
+            )
+
+            cell.border = thin_border
 
         if "Best" in str(cell.value):
             cell.font = Font(bold=True, color="FFFFFF")
@@ -204,40 +249,50 @@ def populate_course_sheet(
 
     # Add section headings for Marks and Percentages (Row 11)
     # Marks section heading (spans all raw score columns)
+    marks_title_row = 12
     marks_start_col = get_column_letter(start_col)
     marks_end_col = get_column_letter(start_col + quiz_count - 1)
-    marks_range = f"{marks_start_col}11:{marks_end_col}11"
+    marks_range = f"{marks_start_col}{marks_title_row}:{marks_end_col}{marks_title_row}"
     worksheet.merge_cells(marks_range)
-    worksheet[f"{marks_start_col}11"] = "Marks"  # TODO: Change to marks
-    worksheet[f"{marks_start_col}11"].font = Font(size=14, bold=True)
-    worksheet[f"{marks_start_col}11"].alignment = Alignment(
+    worksheet[f"{marks_start_col}{marks_title_row}"] = "Marks"
+    worksheet[f"{marks_start_col}{marks_title_row}"].font = Font(size=14, bold=True)
+    worksheet[f"{marks_start_col}{marks_title_row}"].alignment = Alignment(
         horizontal="center", vertical="center"
     )
-    worksheet[f"{marks_start_col}11"].fill = PatternFill(
-        start_color="D9E1F2", end_color="D9E1F2", fill_type="solid"
+    worksheet[f"{marks_start_col}{marks_title_row}"].fill = PatternFill(
+        start_color="E6B8B7", end_color="E6B8B7", fill_type="solid"
     )
+
+    # Apply border to all cells in the merged marks range
+    apply_border_to_range(worksheet, marks_range, thin_border)
 
     # Percentages section heading (spans all percentage and sorted percentage columns)
     percent_start_col = get_column_letter(start_col + quiz_count + spacing_offset)
     percent_end_col = get_column_letter(
         start_col + quiz_count * 3 - 1 + spacing_offset
     )  # Includes both regular and sorted percentages
-    percent_range = f"{percent_start_col}11:{percent_end_col}11"
+    percent_range = (
+        f"{percent_start_col}{marks_title_row}:{percent_end_col}{marks_title_row}"
+    )
     worksheet.merge_cells(percent_range)
-    worksheet[f"{percent_start_col}11"] = "Percentages"
-    worksheet[f"{percent_start_col}11"].font = Font(size=14, bold=True)
-    worksheet[f"{percent_start_col}11"].alignment = Alignment(
+    worksheet[f"{percent_start_col}{marks_title_row}"] = "Percentages"
+    worksheet[f"{percent_start_col}{marks_title_row}"].font = Font(size=14, bold=True)
+    worksheet[f"{percent_start_col}{marks_title_row}"].alignment = Alignment(
         horizontal="center", vertical="center"
     )
-    worksheet[f"{percent_start_col}11"].fill = PatternFill(
-        start_color="D9E1F2", end_color="D9E1F2", fill_type="solid"
+    worksheet[f"{percent_start_col}{marks_title_row}"].fill = PatternFill(
+        start_color="E6B8B7", end_color="E6B8B7", fill_type="solid"
     )
+    apply_border_to_range(
+        worksheet, percent_range, thin_border
+    )  # Apply border to all cells in the merged percentages range
 
     # Place Quiz Titles in row 8 with contrasting style and wrap text enabled
+    quiz_info_table_start_row = 13
     for idx, quizId in enumerate(quiz_details, start=start_col):
         # Original quiz columns
         col_letter = get_column_letter(idx)
-        cell = worksheet[f"{col_letter}8"]
+        cell = worksheet[f"{col_letter}{quiz_info_table_start_row}"]
         cell.value = quiz_details[quizId]["title"]
         cell.font = Font(bold=True, color="FFFFFF")
         cell.fill = PatternFill(
@@ -252,9 +307,11 @@ def populate_course_sheet(
     for idx, quizId in enumerate(quiz_details, start=start_col):
         # Original date columns
         col_letter = get_column_letter(idx)
-        worksheet[f"{col_letter}9"] = quiz_details[quizId]["date"]
-        worksheet[f"{col_letter}9"].font = Font(bold=True)
-        worksheet[f"{col_letter}9"].fill = PatternFill(
+        worksheet[f"{col_letter}{quiz_info_table_start_row + 1}"] = quiz_details[
+            quizId
+        ]["date"]
+        worksheet[f"{col_letter}{quiz_info_table_start_row + 1}"].font = Font(bold=True)
+        worksheet[f"{col_letter}{quiz_info_table_start_row + 1}"].fill = PatternFill(
             start_color="FFD966", end_color="FFD966", fill_type="solid"
         )
 
@@ -262,12 +319,16 @@ def populate_course_sheet(
     for idx, quizId in enumerate(quiz_details, start=start_col):
         # Original total score columns
         col_letter = get_column_letter(idx)
-        worksheet[f"{col_letter}10"] = f"Total: {quiz_details[quizId]['totalScore']}"
-        worksheet[f"{col_letter}10"].font = Font(bold=True)
-        worksheet[f"{col_letter}10"].fill = PatternFill(
+        worksheet[f"{col_letter}{quiz_info_table_start_row + 2}"] = (
+            f"Total: {quiz_details[quizId]['totalScore']}"
+        )
+        worksheet[f"{col_letter}{quiz_info_table_start_row + 2}"].font = Font(bold=True)
+        worksheet[f"{col_letter}{quiz_info_table_start_row + 2}"].fill = PatternFill(
             start_color="FFD966", end_color="FFD966", fill_type="solid"
         )
-        worksheet[f"{col_letter}10"].alignment = Alignment(horizontal="left")
+        worksheet[f"{col_letter}{quiz_info_table_start_row + 2}"].alignment = Alignment(
+            horizontal="left"
+        )
 
     # Add header for the sorted percentages section
     rank_start_col = start_col + quiz_count * 2 + spacing_offset
@@ -276,7 +337,9 @@ def populate_course_sheet(
     percent_start_col_num = start_col + quiz_count + spacing_offset
 
     # Apply formatting to each row in the percentage columns
-    for row in range(13, 13 + len(df)):  # Start from row 13 (data rows after header)
+    for row in range(
+        df_start_row + 2, df_start_row + 2 + len(df)
+    ):  # Start from row 13 (data rows after header)
         # Format regular percentage columns
         for i in range(quiz_count):
             col_letter = get_column_letter(percent_start_col_num + i)
@@ -297,6 +360,7 @@ def populate_course_sheet(
         for cell in col:
             if cell.value == "spacing":
                 cell.value = ""
+                cell.border = Border()
                 max_length = 20
             elif cell.value:
                 max_length = max(max_length, len(str(cell.value)))
@@ -342,7 +406,7 @@ async def generate_excel_class_report(
 
     if not course_ids:
         logger.debug("No courses found for this class.")
-        return None
+        return {}
 
     outfile = BytesIO()
     # Create a single Excel writer for multiple sheets
@@ -597,5 +661,9 @@ if __name__ == "__main__":
 
     # Test generate_excel_class_report
     class_id = "cm48alxli00007ke7ch082mz0"
-    report = asyncio.run(generate_excel_class_report(class_id, start_date=start_date, end_date=end_date, save_to_file=True))
+    report = asyncio.run(
+        generate_excel_class_report(
+            class_id, start_date=start_date, end_date=end_date, save_to_file=True
+        )
+    )
     # print(report)
