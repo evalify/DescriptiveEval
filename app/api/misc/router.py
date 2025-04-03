@@ -14,18 +14,34 @@ async def get_course_report(request: CourseReportRequest):
     Generate and stream an Excel report for a course.
 
     Returns an Excel file with student scores for all quizzes in the course.
+    Allows filtering by date range using start_date and end_date parameters (format: YYYY-MM-DD).
     """
     course_id = request.course_id
+    start_date = request.start_date
+    end_date = request.end_date
+
     logger.debug(
-        f"Received request to generate course report for course_id: {course_id}"
+        f"Received request to generate course report for course_id: {course_id}, timeframe: {start_date} to {end_date}"
     )
     try:
         # Generate the Excel report
         logger.info(f"Generating Excel report for course: {course_id}")
-        excel_data = await generate_excel_report(course_id)
+        excel_data = await generate_excel_report(
+            course_id, save_to_file=True, start_date=start_date, end_date=end_date
+        )
         course_code = excel_data.get("course_code")
-        # Create filename with course code and timestamp for the download
-        filename = f"{course_code}_course_report_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
+
+        # Create filename with course code, timeframe and timestamp for the download
+        timeframe_text = ""
+        if start_date or end_date:
+            if start_date and end_date:
+                timeframe_text = f"_{start_date}_to_{end_date}"
+            elif start_date:
+                timeframe_text = f"_from_{start_date}"
+            elif end_date:
+                timeframe_text = f"_until_{end_date}"
+
+        filename = f"{course_code}{timeframe_text}_course_report_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
         logger.debug(f"Created filename: {filename}")
 
         # Return the Excel file as a streaming response
@@ -50,14 +66,21 @@ async def get_class_report(request: ClassReportRequest):
 
     Returns a single Excel file with multiple sheets, one for each course in the class.
     Each sheet contains student scores for all quizzes in that course.
+    Allows filtering by date range using start_date and end_date parameters (format: YYYY-MM-DD).
     """
     class_id = request.class_id
+    start_date = request.start_date
+    end_date = request.end_date
 
-    logger.debug(f"Received request to generate class report for class_id: {class_id}")
+    logger.debug(
+        f"Received request to generate class report for class_id: {class_id}, timeframe: {start_date} to {end_date}"
+    )
     try:
         # Generate the Excel report for all courses in the class
         logger.info(f"Generating Excel report for class: {class_id}")
-        response = await generate_excel_class_report(class_id, save_to_file=False)
+        response = await generate_excel_class_report(
+            class_id, save_to_file=False, start_date=start_date, end_date=end_date
+        )
         excel_data = response.get("file")
         class_name = response.get("class_name")
         if not excel_data:
@@ -67,8 +90,17 @@ async def get_class_report(request: ClassReportRequest):
                 detail=f"No courses found for class: {class_id}",
             )
 
-        # Create filename with class ID and timestamp for the download
-        filename = f"class_{class_name}_report_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
+        # Create filename with class ID, timeframe and timestamp for the download
+        timeframe_text = ""
+        if start_date or end_date:
+            if start_date and end_date:
+                timeframe_text = f"_{start_date}_to_{end_date}"
+            elif start_date:
+                timeframe_text = f"_from_{start_date}"
+            elif end_date:
+                timeframe_text = f"_until_{end_date}"
+
+        filename = f"class_{class_name}{timeframe_text}_report_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
         logger.debug(f"Created filename: {filename}")
 
         # Return the Excel file as a streaming response

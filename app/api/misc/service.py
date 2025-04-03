@@ -130,7 +130,14 @@ def populate_course_sheet(
     worksheet = workbook[sheet_name]
 
     # Add title and summary information
-    from openpyxl.styles import Font, Border, PatternFill, Alignment
+    from openpyxl.styles import Font, Border, PatternFill, Alignment, Side
+
+    thin_border = Border(
+            left=Side(style="thin"),
+            right=Side(style="thin"),
+            top=Side(style="thin"),
+            bottom=Side(style="thin"),
+        )
 
     # Title row: merged cells A1 to H1 for a prominent course title
     worksheet.merge_cells("A1:H1")
@@ -140,23 +147,36 @@ def populate_course_sheet(
     worksheet["A1"].fill = PatternFill(
         start_color="D9E1F2", end_color="D9E1F2", fill_type="solid"
     )
-    logger.debug("Title row formatted.")
+    logger.debug("Quiz Title row formatted.")
+
+    # Prepare timeframe display text
+    timeframe_text = "All quizzes"
+    if report_data.get("start_date") and report_data.get("end_date"):
+        timeframe_text = (
+            f"From {report_data['start_date']} to {report_data['end_date']}"
+        )
+    elif report_data.get("start_date"):
+        timeframe_text = f"From {report_data['start_date']} onwards"
+    elif report_data.get("end_date"):
+        timeframe_text = f"Until {report_data['end_date']}"
 
     # Summary section starting at row 2 with clear labels and values
     summary_data = [
-        ("Course Code:", course_code),
-        ("Course Name:", course_name),
-        ("Class Name:", class_name),
-        ("Total Students:", report_data["student_count"]),
-        ("Total Quizzes:", report_data["quiz_count"]),
-        ("Generated On:", datetime.now().strftime("%d/%m/%Y %H:%M:%S")),
-        ("CourseId:", course_id),
-        ("ClassId:", report_data["class_id"]),
+        ("Course Code", course_code),
+        ("Course Name", course_name),
+        ("Class Name", class_name),
+        ("Total Students", report_data["student_count"]),
+        ("Total Quizzes", report_data["quiz_count"]),
+        ("Timeframe", timeframe_text),
+        ("Generated On", datetime.now().strftime("%d/%m/%Y %H:%M:%S")),
+        ("CourseId", course_id),
+        ("ClassId", report_data["class_id"]),
     ]
     for i, (label, value) in enumerate(summary_data, start=2):
         label_cell = worksheet[f"A{i}"]
         label_cell.value = label
         label_cell.font = Font(bold=True)
+        label_cell.alignment = Alignment(horizontal="left")
         worksheet[f"B{i}"] = value
     logger.debug("Summary data added to Excel sheet.")
 
@@ -288,11 +308,20 @@ def populate_course_sheet(
 
 
 async def generate_excel_class_report(
-    class_id: str, save_to_file: bool = True
+    class_id: str,
+    save_to_file: bool = True,
+    start_date: str = None,
+    end_date: str = None,
 ) -> Dict[str, BytesIO | str]:
     """
     Generate a multi-sheet Excel report for all courses in a class.
     Each course report will be a separate sheet in the Excel file.
+
+    Args:
+        class_id: str - The class ID
+        save_to_file: bool - Whether to save the report to a file
+        start_date: str - Optional start date to filter quizzes (format: YYYY-MM-DD)
+        end_date: str - Optional end date to filter quizzes (format: YYYY-MM-DD)
     """
     # Get all courseids for the class
     query = """
@@ -319,7 +348,7 @@ async def generate_excel_class_report(
     # Create a single Excel writer for multiple sheets
     with pd.ExcelWriter(outfile, engine="openpyxl") as writer:
         for course_id in course_ids:
-            report_data = await fetch_course_report(course_id)
+            report_data = await fetch_course_report(course_id, start_date, end_date)
             populate_course_sheet(writer, course_id, report_data)
             logger.debug(f"Report sheet generated for course ID: {course_id}")
 
@@ -334,7 +363,19 @@ async def generate_excel_class_report(
 
         # Create filename with timestamp
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{directory}/class_{class_id}_report_{timestamp}.xlsx"
+        # Include timeframe info in filename if present
+        timeframe_text = ""
+        if start_date or end_date:
+            if start_date and end_date:
+                timeframe_text = f"_{start_date}_to_{end_date}"
+            elif start_date:
+                timeframe_text = f"_from_{start_date}"
+            elif end_date:
+                timeframe_text = f"_until_{end_date}"
+
+        filename = (
+            f"{directory}/class_{class_id}{timeframe_text}_report_{timestamp}.xlsx"
+        )
 
         # Save to file
         with open(filename, "wb") as file:
@@ -346,8 +387,12 @@ async def generate_excel_class_report(
     return {"file": outfile, "class_name": class_name}
 
 
-async def fetch_course_report(course_id: str):
-    logger.debug(f"Fetching course report for course ID: {course_id}")
+async def fetch_course_report(
+    course_id: str, start_date: str = None, end_date: str = None
+):
+    logger.debug(
+        f"Fetching course report for course ID: {course_id}, timeframe: {start_date} to {end_date}"
+    )
     query = """
     SELECT 
         s."id" AS "studentId",
@@ -366,10 +411,21 @@ async def fetch_course_report(course_id: str):
     LEFT JOIN "Quiz" q ON cq."B" = q."id"
     LEFT JOIN "QuizResult" qr ON s."id" = qr."studentId" AND cq."B" = qr."quizId"
     WHERE c."id" = %s AND q."isEvaluated" = 'EVALUATED' AND qr."isEvaluated" = 'EVALUATED'
-    ORDER BY s."id", cq."B";
     """
+
+    # Add date filtering if timeframe parameters are provided
+    params = [course_id]
+    if start_date:
+        query += ' AND q."startTime" >= %s'
+        params.append(start_date)
+    if end_date:
+        query += ' AND q."startTime" <= %s'
+        params.append(end_date)
+
+    query += ' ORDER BY s."id", cq."B";'
+
     with get_db_cursor() as (cursor, conn):
-        cursor.execute(query, (course_id,))
+        cursor.execute(query, tuple(params))
         rows = cursor.fetchall()
         logger.debug(f"Query executed, {len(rows)} rows fetched.")
 
@@ -442,21 +498,34 @@ async def fetch_course_report(course_id: str):
         "class_id": class_id,
         "student_count": len(students_list),
         "quiz_count": len(quiz_info),
+        "start_date": start_date,
+        "end_date": end_date,
     }
 
 
 async def generate_excel_report(
-    course_id: str, output_file: BytesIO = None, save_to_file: bool = True
+    course_id: str,
+    output_file: BytesIO = None,
+    save_to_file: bool = True,
+    start_date: str = None,
+    end_date: str = None,
 ):
     """
     Generate an Excel report for the course.
     Returns a Dictionary with the Excel file as BytesIO Object and course code.
+
+    Args:
+        course_id: str - The course ID
+        output_file: BytesIO - Optional output file to write to
+        save_to_file: bool - Whether to save the report to a file
+        start_date: str - Optional start date to filter quizzes (format: YYYY-MM-DD)
+        end_date: str - Optional end date to filter quizzes (format: YYYY-MM-DD)
     """
     logger.debug(
-        f"Generating Excel report for course ID: {course_id}, save_to_file: {save_to_file}"
+        f"Generating Excel report for course ID: {course_id}, timeframe: {start_date} to {end_date}, save_to_file: {save_to_file}"
     )
-    # Fetch the course report data
-    report_data = await fetch_course_report(course_id)
+    # Fetch the course report data with optional timeframe filtering
+    report_data = await fetch_course_report(course_id, start_date, end_date)
 
     # Create Excel file in memory
     if not output_file:
@@ -518,9 +587,15 @@ if __name__ == "__main__":
 
     # Test save_excel_report
     # directory = "data/reports"
-    filename = asyncio.run(generate_excel_report(course_id, save_to_file=True))
+    start_date = None
+    end_date = "2025-03-16"
+    # filename = asyncio.run(
+    #     generate_excel_report(
+    #         course_id, start_date=start_date, end_date=end_date, save_to_file=True
+    #     )
+    # )
 
     # Test generate_excel_class_report
-    # class_id = "cm48alxli00007ke7ch082mz0"
-    # report = asyncio.run(generate_excel_class_report(class_id, save_to_file=True))
+    class_id = "cm48alxli00007ke7ch082mz0"
+    report = asyncio.run(generate_excel_class_report(class_id, start_date=start_date, end_date=end_date, save_to_file=True))
     # print(report)

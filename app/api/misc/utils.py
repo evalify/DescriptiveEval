@@ -1,12 +1,14 @@
 import datetime
 from pytz import timezone
 from app.core.logger import logger
+from openpyxl.utils import (
+    get_column_letter as openpyxl_get_column_letter,
+    column_index_from_string,
+)
 
 
 def get_column_letter(col_idx):
     """Convert column index to Excel column letter (1-based)"""
-    from openpyxl.utils import get_column_letter as openpyxl_get_column_letter
-
     return openpyxl_get_column_letter(col_idx)
 
 
@@ -29,3 +31,18 @@ def format_date(date_str):
     except Exception as e:
         logger.error(f"Error formatting date: {e}")
         return date_str
+
+def apply_border_to_range(worksheet, range_string, border):
+    """
+    Helper function to apply borders to all cells in a merged range
+    """
+    start_cell, end_cell = range_string.split(":")
+    start_col = column_index_from_string("".join(filter(str.isalpha, start_cell)))
+    start_row = int("".join(filter(str.isdigit, start_cell)))
+    end_col = column_index_from_string("".join(filter(str.isalpha, end_cell)))
+    end_row = int("".join(filter(str.isdigit, end_cell)))
+
+    for row in range(start_row, end_row + 1):
+        for col in range(start_col, end_col + 1):
+            cell = worksheet.cell(row=row, column=col)
+            cell.border = border
