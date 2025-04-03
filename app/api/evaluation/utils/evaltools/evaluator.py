@@ -641,9 +641,12 @@ class ResponseEvaluator:
 
         driver_code = question.get("driverCode")
         test_cases = question.get("testCases", [])
-        if not driver_code or not test_cases:
-            raise InvalidQuestionError(
-                f"Question {qid} is missing driver code or test cases"
+        if not driver_code:
+            raise InvalidQuestionError(f"Question {qid} is missing driver code")
+        if not test_cases:
+            # Test cases will be inferred from the driver code if not explicitly provided
+            self.qlogger.warning(
+                f"No test cases found for coding question {qid} - will infer from driver code"
             )
 
         try:
