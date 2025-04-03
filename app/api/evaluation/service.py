@@ -552,15 +552,17 @@ async def bulk_evaluate_quiz_responses(
             await save_quiz_report(
                 quiz_id, quiz_report, pg_cursor, pg_conn, save_to_file
             )
-            qlogger.info("Quiz report generated and saved successfully")
-
-            # Update evaluation status
-            qlogger.info("Updating quiz evaluation status")
-            pg_cursor.execute(
-                """UPDATE "Quiz" SET "isEvaluated" = 'EVALUATED' WHERE "id" = %s""",
-                (quiz_id,),
+            qlogger.info(
+                "Quiz report generated, saved successfully and Updated evaluation status"
             )
-            pg_conn.commit()
+
+            # Update evaluation status (moved to save_quiz_report)
+            # qlogger.info("Updating quiz evaluation status")
+            # pg_cursor.execute(
+            #     """UPDATE "Quiz" SET "isEvaluated" = 'EVALUATED' WHERE "id" = %s""",
+            #     (quiz_id,),
+            # )
+            # pg_conn.commit()
 
             save_quiz_data(
                 {

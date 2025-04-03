@@ -212,6 +212,16 @@ async def save_quiz_report(
 
             qlogger.info("Quiz report saved to database successfully")
 
+            qlogger.debug("Attempting to update quiz status in database")
+            async with asyncio.timeout(timeout):
+                await asyncio.to_thread(
+                    cursor.execute,
+                    """UPDATE "Quiz" SET "isEvaluated" = 'EVALUATED' WHERE "id" = %s""",
+                    (quiz_id,),
+                )
+                await asyncio.to_thread(conn.commit)
+            qlogger.info("Quiz status updated to EVALUATED successfully")
+
             # Save to file if requested
             if save_to_file:
                 save_quiz_data(report, quiz_id, "report")
