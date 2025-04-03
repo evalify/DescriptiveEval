@@ -29,6 +29,7 @@ from .static_eval import (
     evaluate_mcq_with_partial_marking,
     evaluate_true_false,
     direct_match,
+    fitb_static_scoring,
 )
 from app.core.logger import QuizLogger
 from app.config.constants import MAX_RETRIES
@@ -801,11 +802,26 @@ class ResponseEvaluator:
         if not correct_answer:
             raise InvalidQuestionError(f"Question {qid} is missing expected answer")
 
-        if await direct_match(
-            response, correct_answer, strip=True, case_sensitive=False
-        ):
+        direct_eval_score = 0
+        try:
+            direct_eval_score = await fitb_static_scoring(
+                response,
+                correct_answer,
+                question_total_score,
+                strip=True,
+                case_sensitive=False,
+            )
+        except (ValueError, TypeError, KeyError) as e:
+            self.qlogger.error(
+                f"Direct evaluation failed for question {qid}. Using LLM instead: {str(e)}",
+                exc_info=True,
+            )
+
+        if (
+            isinstance(direct_eval_score, int) or isinstance(direct_eval_score, float)
+        ) and direct_eval_score > 0:
             fitb_score = {
-                "score": question_total_score,
+                "score": direct_eval_score,
                 "reason": "Exact Match",
                 "status": EvaluationStatus.SUCCESS,
             }
