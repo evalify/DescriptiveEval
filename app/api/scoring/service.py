@@ -143,7 +143,7 @@ async def score(
             ),
             "score": float(parsed_response.get("score", 0.0)),
             "reason": str(parsed_response.get("reason", "No reason provided")),
-            "status": parsed_response.get("status", EvaluationStatus.SUCCESS),
+            "status": parsed_response.get("status", EvaluationStatus.LLM_ERROR),
         }
     except Exception as e:
         logger.warning(f"Error processing response: {str(e)}")
