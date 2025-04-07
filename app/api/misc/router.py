@@ -15,31 +15,39 @@ async def get_course_report(request: CourseReportRequest):
 
     Returns an Excel file with student scores for all quizzes in the course.
     Allows filtering by date range using start_date and end_date parameters (format: YYYY-MM-DD).
+    The exclude_dates parameter determines whether to include or exclude quizzes in the specified date range.
     """
     course_id = request.course_id
     start_date = request.start_date
     end_date = request.end_date
+    exclude_dates = request.exclude_dates
 
     logger.debug(
-        f"Received request to generate course report for course_id: {course_id}, timeframe: {start_date} to {end_date}"
+        f"Received request to generate course report for course_id: {course_id}, "
+        f"timeframe: {start_date} to {end_date}, exclude_dates: {exclude_dates}"
     )
     try:
         # Generate the Excel report
         logger.info(f"Generating Excel report for course: {course_id}")
         excel_data = await generate_excel_report(
-            course_id, save_to_file=True, start_date=start_date, end_date=end_date
+            course_id,
+            save_to_file=True,
+            start_date=start_date,
+            end_date=end_date,
+            exclude_dates=exclude_dates,
         )
         course_code = excel_data.get("course_code")
 
         # Create filename with course code, timeframe and timestamp for the download
         timeframe_text = ""
         if start_date or end_date:
+            exclude_text = "excluding" if exclude_dates else "from"
             if start_date and end_date:
-                timeframe_text = f"_{start_date}_to_{end_date}"
+                timeframe_text = f"_{exclude_text}_{start_date}_to_{end_date}"
             elif start_date:
-                timeframe_text = f"_from_{start_date}"
+                timeframe_text = f"_{exclude_text}_{start_date}_onwards"
             elif end_date:
-                timeframe_text = f"_until_{end_date}"
+                timeframe_text = f"_{exclude_text}_until_{end_date}"
 
         filename = f"{course_code}{timeframe_text}_course_report_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
         logger.debug(f"Created filename: {filename}")
@@ -67,19 +75,26 @@ async def get_class_report(request: ClassReportRequest):
     Returns a single Excel file with multiple sheets, one for each course in the class.
     Each sheet contains student scores for all quizzes in that course.
     Allows filtering by date range using start_date and end_date parameters (format: YYYY-MM-DD).
+    The exclude_dates parameter determines whether to include or exclude quizzes in the specified date range.
     """
     class_id = request.class_id
     start_date = request.start_date
     end_date = request.end_date
+    exclude_dates = request.exclude_dates
 
     logger.debug(
-        f"Received request to generate class report for class_id: {class_id}, timeframe: {start_date} to {end_date}"
+        f"Received request to generate class report for class_id: {class_id}, "
+        f"timeframe: {start_date} to {end_date}, exclude_dates: {exclude_dates}"
     )
     try:
         # Generate the Excel report for all courses in the class
         logger.info(f"Generating Excel report for class: {class_id}")
         response = await generate_excel_class_report(
-            class_id, save_to_file=False, start_date=start_date, end_date=end_date
+            class_id,
+            save_to_file=False,
+            start_date=start_date,
+            end_date=end_date,
+            exclude_dates=exclude_dates,
         )
         excel_data = response.get("file")
         class_name = response.get("class_name")
@@ -93,12 +108,13 @@ async def get_class_report(request: ClassReportRequest):
         # Create filename with class ID, timeframe and timestamp for the download
         timeframe_text = ""
         if start_date or end_date:
+            exclude_text = "excluding" if exclude_dates else "from"
             if start_date and end_date:
-                timeframe_text = f"_{start_date}_to_{end_date}"
+                timeframe_text = f"_{exclude_text}_{start_date}_to_{end_date}"
             elif start_date:
-                timeframe_text = f"_from_{start_date}"
+                timeframe_text = f"_{exclude_text}_{start_date}_onwards"
             elif end_date:
-                timeframe_text = f"_until_{end_date}"
+                timeframe_text = f"_{exclude_text}_until_{end_date}"
 
         filename = f"class_{class_name}{timeframe_text}_report_{time.strftime('%Y%m%d_%H%M%S')}.xlsx"
         logger.debug(f"Created filename: {filename}")

@@ -138,6 +138,7 @@ async def bulk_evaluate_quiz_responses(
             """UPDATE "QuizResult" SET "isEvaluated" = 'UNEVALUATED' WHERE "quizId" = %s""",
             (quiz_id,),
         )
+        pg_conn.commit()
 
     try:
         # Get quiz data

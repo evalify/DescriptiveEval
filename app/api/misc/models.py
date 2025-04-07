@@ -6,9 +6,11 @@ class CourseReportRequest(BaseModel):
     course_id: str
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    exclude_dates: bool = False  # Default is to include dates in the range
 
 
 class ClassReportRequest(BaseModel):
     class_id: str
     start_date: Optional[str] = None
     end_date: Optional[str] = None
+    exclude_dates: bool = False  # Default is to include dates in the range

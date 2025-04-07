@@ -164,13 +164,16 @@ def populate_course_sheet(
     # Prepare timeframe display text
     timeframe_text = "All quizzes"
     if report_data.get("start_date") and report_data.get("end_date"):
+        action = "Excluding" if report_data.get("exclude_dates") else "From"
         timeframe_text = (
-            f"From {report_data['start_date']} to {report_data['end_date']}"
+            f"{action} {report_data['start_date']} to {report_data['end_date']}"
         )
     elif report_data.get("start_date"):
-        timeframe_text = f"From {report_data['start_date']} onwards"
+        action = "Excluding from" if report_data.get("exclude_dates") else "From"
+        timeframe_text = f"{action} {report_data['start_date']} onwards"
     elif report_data.get("end_date"):
-        timeframe_text = f"Until {report_data['end_date']}"
+        action = "Excluding until" if report_data.get("exclude_dates") else "Until"
+        timeframe_text = f"{action} {report_data['end_date']}"
 
     # Summary section starting at row 2 with clear labels and values
     summary_data = [
@@ -253,7 +256,10 @@ def populate_course_sheet(
     marks_start_col = get_column_letter(start_col)
     marks_end_col = get_column_letter(start_col + quiz_count - 1)
     marks_range = f"{marks_start_col}{marks_title_row}:{marks_end_col}{marks_title_row}"
-    worksheet.merge_cells(marks_range)
+
+    if quiz_count > 0:
+        worksheet.merge_cells(marks_range)
+
     worksheet[f"{marks_start_col}{marks_title_row}"] = "Marks"
     worksheet[f"{marks_start_col}{marks_title_row}"].font = Font(size=14, bold=True)
     worksheet[f"{marks_start_col}{marks_title_row}"].alignment = Alignment(
@@ -274,7 +280,8 @@ def populate_course_sheet(
     percent_range = (
         f"{percent_start_col}{marks_title_row}:{percent_end_col}{marks_title_row}"
     )
-    worksheet.merge_cells(percent_range)
+    if quiz_count > 0:
+        worksheet.merge_cells(percent_range)
     worksheet[f"{percent_start_col}{marks_title_row}"] = "Percentages"
     worksheet[f"{percent_start_col}{marks_title_row}"].font = Font(size=14, bold=True)
     worksheet[f"{percent_start_col}{marks_title_row}"].alignment = Alignment(
@@ -376,6 +383,7 @@ async def generate_excel_class_report(
     save_to_file: bool = True,
     start_date: str = None,
     end_date: str = None,
+    exclude_dates: bool = False,
 ) -> Dict[str, BytesIO | str]:
     """
     Generate a multi-sheet Excel report for all courses in a class.
@@ -386,6 +394,7 @@ async def generate_excel_class_report(
         save_to_file: bool - Whether to save the report to a file
         start_date: str - Optional start date to filter quizzes (format: YYYY-MM-DD)
         end_date: str - Optional end date to filter quizzes (format: YYYY-MM-DD)
+        exclude_dates: bool - Whether to exclude (True) or include (False) quizzes in the date range
     """
     # Get all courseids for the class
     query = """
@@ -412,7 +421,12 @@ async def generate_excel_class_report(
     # Create a single Excel writer for multiple sheets
     with pd.ExcelWriter(outfile, engine="openpyxl") as writer:
         for course_id in course_ids:
-            report_data = await fetch_course_report(course_id, start_date, end_date)
+            report_data = await fetch_course_report(
+                course_id,
+                start_date=start_date,
+                end_date=end_date,
+                exclude_dates=exclude_dates,
+            )
             populate_course_sheet(writer, course_id, report_data)
             logger.debug(f"Report sheet generated for course ID: {course_id}")
 
@@ -430,12 +444,13 @@ async def generate_excel_class_report(
         # Include timeframe info in filename if present
         timeframe_text = ""
         if start_date or end_date:
+            exclude_text = "excluding" if exclude_dates else "from"
             if start_date and end_date:
-                timeframe_text = f"_{start_date}_to_{end_date}"
+                timeframe_text = f"_{exclude_text}_{start_date}_to_{end_date}"
             elif start_date:
-                timeframe_text = f"_from_{start_date}"
+                timeframe_text = f"_{exclude_text}_{start_date}_onwards"
             elif end_date:
-                timeframe_text = f"_until_{end_date}"
+                timeframe_text = f"_{exclude_text}_until_{end_date}"
 
         filename = (
             f"{directory}/class_{class_id}{timeframe_text}_report_{timestamp}.xlsx"
@@ -452,10 +467,13 @@ async def generate_excel_class_report(
 
 
 async def fetch_course_report(
-    course_id: str, start_date: str = None, end_date: str = None
+    course_id: str,
+    start_date: str = None,
+    end_date: str = None,
+    exclude_dates: bool = False,
 ):
     logger.debug(
-        f"Fetching course report for course ID: {course_id}, timeframe: {start_date} to {end_date}"
+        f"Fetching course report for course ID: {course_id}, timeframe: {start_date} to {end_date}, exclude_dates: {exclude_dates}"
     )
     query = """
     SELECT 
@@ -479,12 +497,27 @@ async def fetch_course_report(
 
     # Add date filtering if timeframe parameters are provided
     params = [course_id]
-    if start_date:
-        query += ' AND q."startTime" >= %s'
-        params.append(start_date)
-    if end_date:
-        query += ' AND q."startTime" <= %s'
-        params.append(end_date)
+
+    if start_date or end_date:
+        if exclude_dates:
+            # Exclude quizzes within the date range
+            if start_date and end_date:
+                query += ' AND (q."startTime" < %s OR q."startTime" > %s)'
+                params.extend([start_date, end_date])
+            elif start_date:
+                query += ' AND q."startTime" < %s'
+                params.append(start_date)
+            elif end_date:
+                query += ' AND q."startTime" > %s'
+                params.append(end_date)
+        else:
+            # Include quizzes within the date range (original behavior)
+            if start_date:
+                query += ' AND q."startTime" >= %s'
+                params.append(start_date)
+            if end_date:
+                query += ' AND q."startTime" <= %s'
+                params.append(end_date)
 
     query += ' ORDER BY s."id", cq."B";'
 
@@ -564,6 +597,7 @@ async def fetch_course_report(
         "quiz_count": len(quiz_info),
         "start_date": start_date,
         "end_date": end_date,
+        "exclude_dates": exclude_dates,
     }
 
 
@@ -573,6 +607,7 @@ async def generate_excel_report(
     save_to_file: bool = True,
     start_date: str = None,
     end_date: str = None,
+    exclude_dates: bool = False,
 ):
     """
     Generate an Excel report for the course.
@@ -584,12 +619,16 @@ async def generate_excel_report(
         save_to_file: bool - Whether to save the report to a file
         start_date: str - Optional start date to filter quizzes (format: YYYY-MM-DD)
         end_date: str - Optional end date to filter quizzes (format: YYYY-MM-DD)
+        exclude_dates: bool - Whether to exclude (True) or include (False) quizzes in the date range
     """
     logger.debug(
-        f"Generating Excel report for course ID: {course_id}, timeframe: {start_date} to {end_date}, save_to_file: {save_to_file}"
+        f"Generating Excel report for course ID: {course_id}, timeframe: {start_date} to {end_date}, "
+        f"exclude_dates: {exclude_dates}, save_to_file: {save_to_file}"
     )
     # Fetch the course report data with optional timeframe filtering
-    report_data = await fetch_course_report(course_id, start_date, end_date)
+    report_data = await fetch_course_report(
+        course_id, start_date, end_date, exclude_dates
+    )
 
     # Create Excel file in memory
     if not output_file:

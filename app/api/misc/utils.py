@@ -32,6 +32,7 @@ def format_date(date_str):
         logger.error(f"Error formatting date: {e}")
         return date_str
 
+
 def apply_border_to_range(worksheet, range_string, border):
     """
     Helper function to apply borders to all cells in a merged range
