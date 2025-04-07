@@ -16,15 +16,18 @@ async def get_course_report(request: CourseReportRequest):
     Returns an Excel file with student scores for all quizzes in the course.
     Allows filtering by date range using start_date and end_date parameters (format: YYYY-MM-DD).
     The exclude_dates parameter determines whether to include or exclude quizzes in the specified date range.
+    Alternatively, you can provide specific_dates as a list of exact dates to include or exclude.
     """
     course_id = request.course_id
     start_date = request.start_date
     end_date = request.end_date
     exclude_dates = request.exclude_dates
+    specific_dates = request.specific_dates
 
     logger.debug(
         f"Received request to generate course report for course_id: {course_id}, "
-        f"timeframe: {start_date} to {end_date}, exclude_dates: {exclude_dates}"
+        f"timeframe: {start_date} to {end_date}, exclude_dates: {exclude_dates}, "
+        f"specific_dates: {specific_dates}"
     )
     try:
         # Generate the Excel report
@@ -35,12 +38,19 @@ async def get_course_report(request: CourseReportRequest):
             start_date=start_date,
             end_date=end_date,
             exclude_dates=exclude_dates,
+            specific_dates=specific_dates,
         )
         course_code = excel_data.get("course_code")
 
         # Create filename with course code, timeframe and timestamp for the download
         timeframe_text = ""
-        if start_date or end_date:
+        if specific_dates:
+            date_action = "excluding" if exclude_dates else "including"
+            dates_str = "-".join([d.replace("-", "") for d in specific_dates[:3]])
+            if len(specific_dates) > 3:
+                dates_str += f"_and_{len(specific_dates) - 3}_more"
+            timeframe_text = f"_{date_action}_specific_dates_{dates_str}"
+        elif start_date or end_date:
             exclude_text = "excluding" if exclude_dates else "from"
             if start_date and end_date:
                 timeframe_text = f"_{exclude_text}_{start_date}_to_{end_date}"
@@ -76,15 +86,18 @@ async def get_class_report(request: ClassReportRequest):
     Each sheet contains student scores for all quizzes in that course.
     Allows filtering by date range using start_date and end_date parameters (format: YYYY-MM-DD).
     The exclude_dates parameter determines whether to include or exclude quizzes in the specified date range.
+    The specific_dates parameter allows filtering by a specific list of dates.
     """
     class_id = request.class_id
     start_date = request.start_date
     end_date = request.end_date
     exclude_dates = request.exclude_dates
+    specific_dates = request.specific_dates
 
     logger.debug(
         f"Received request to generate class report for class_id: {class_id}, "
-        f"timeframe: {start_date} to {end_date}, exclude_dates: {exclude_dates}"
+        f"timeframe: {start_date} to {end_date}, exclude_dates: {exclude_dates}, "
+        f"specific_dates: {specific_dates}"
     )
     try:
         # Generate the Excel report for all courses in the class
@@ -95,6 +108,7 @@ async def get_class_report(request: ClassReportRequest):
             start_date=start_date,
             end_date=end_date,
             exclude_dates=exclude_dates,
+            specific_dates=specific_dates,
         )
         excel_data = response.get("file")
         class_name = response.get("class_name")
@@ -107,7 +121,13 @@ async def get_class_report(request: ClassReportRequest):
 
         # Create filename with class ID, timeframe and timestamp for the download
         timeframe_text = ""
-        if start_date or end_date:
+        if specific_dates:
+            dates_str = "-".join([d.replace("-", "") for d in specific_dates[:3]])
+            if len(specific_dates) > 3:
+                dates_str += f"_plus_{len(specific_dates) - 3}_more"
+            exclude_text = "excluding" if exclude_dates else "only"
+            timeframe_text = f"_{exclude_text}_dates_{dates_str}"
+        elif start_date or end_date:
             exclude_text = "excluding" if exclude_dates else "from"
             if start_date and end_date:
                 timeframe_text = f"_{exclude_text}_{start_date}_to_{end_date}"

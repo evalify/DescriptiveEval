@@ -6,7 +6,7 @@ from datetime import datetime
 
 from app.core.logger import logger
 from .utils import format_date, get_column_letter, apply_border_to_range
-from typing import Dict
+from typing import Dict, List, Optional
 
 
 def populate_course_sheet(
@@ -163,7 +163,14 @@ def populate_course_sheet(
 
     # Prepare timeframe display text
     timeframe_text = "All quizzes"
-    if report_data.get("start_date") and report_data.get("end_date"):
+    if report_data.get("specific_dates"):
+        dates_list = report_data.get("specific_dates")
+        action = "Excluding" if report_data.get("exclude_dates") else "Only including"
+        dates_display = ", ".join(dates_list[:5])
+        if len(dates_list) > 5:
+            dates_display += f" and {len(dates_list) - 5} more dates"
+        timeframe_text = f"{action} quizzes on: {dates_display}"
+    elif report_data.get("start_date") and report_data.get("end_date"):
         action = "Excluding" if report_data.get("exclude_dates") else "From"
         timeframe_text = (
             f"{action} {report_data['start_date']} to {report_data['end_date']}"
@@ -384,6 +391,7 @@ async def generate_excel_class_report(
     start_date: str = None,
     end_date: str = None,
     exclude_dates: bool = False,
+    specific_dates: List[str] = None,
 ) -> Dict[str, BytesIO | str]:
     """
     Generate a multi-sheet Excel report for all courses in a class.
@@ -395,6 +403,7 @@ async def generate_excel_class_report(
         start_date: str - Optional start date to filter quizzes (format: YYYY-MM-DD)
         end_date: str - Optional end date to filter quizzes (format: YYYY-MM-DD)
         exclude_dates: bool - Whether to exclude (True) or include (False) quizzes in the date range
+        specific_dates: List[str] - Optional list of specific dates to include or exclude
     """
     # Get all courseids for the class
     query = """
@@ -426,6 +435,7 @@ async def generate_excel_class_report(
                 start_date=start_date,
                 end_date=end_date,
                 exclude_dates=exclude_dates,
+                specific_dates=specific_dates,
             )
             populate_course_sheet(writer, course_id, report_data)
             logger.debug(f"Report sheet generated for course ID: {course_id}")
@@ -443,7 +453,13 @@ async def generate_excel_class_report(
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         # Include timeframe info in filename if present
         timeframe_text = ""
-        if start_date or end_date:
+        if specific_dates:
+            date_action = "excluding" if exclude_dates else "including"
+            dates_str = "-".join([d.replace("-", "") for d in specific_dates[:3]])
+            if len(specific_dates) > 3:
+                dates_str += f"_and_{len(specific_dates) - 3}_more"
+            timeframe_text = f"_{date_action}_specific_dates_{dates_str}"
+        elif start_date or end_date:
             exclude_text = "excluding" if exclude_dates else "from"
             if start_date and end_date:
                 timeframe_text = f"_{exclude_text}_{start_date}_to_{end_date}"
@@ -471,9 +487,10 @@ async def fetch_course_report(
     start_date: str = None,
     end_date: str = None,
     exclude_dates: bool = False,
+    specific_dates: Optional[List[str]] = None,
 ):
     logger.debug(
-        f"Fetching course report for course ID: {course_id}, timeframe: {start_date} to {end_date}, exclude_dates: {exclude_dates}"
+        f"Fetching course report for course ID: {course_id}, timeframe: {start_date} to {end_date}, exclude_dates: {exclude_dates}, specific_dates: {specific_dates}"
     )
     query = """
     SELECT 
@@ -498,7 +515,16 @@ async def fetch_course_report(
     # Add date filtering if timeframe parameters are provided
     params = [course_id]
 
-    if start_date or end_date:
+    # Documenting priority: specific_dates takes precedence over date range parameters
+    if specific_dates:
+        # Handle specific dates filtering
+        if exclude_dates:
+            query += ' AND q."startTime"::date NOT IN %s'
+        else:
+            query += ' AND q."startTime"::date IN %s'
+        params.append(tuple(specific_dates))
+    elif start_date or end_date:
+        # Handle start_date and end_date filtering
         if exclude_dates:
             # Exclude quizzes within the date range
             if start_date and end_date:
@@ -598,6 +624,7 @@ async def fetch_course_report(
         "start_date": start_date,
         "end_date": end_date,
         "exclude_dates": exclude_dates,
+        "specific_dates": specific_dates,
     }
 
 
@@ -608,6 +635,7 @@ async def generate_excel_report(
     start_date: str = None,
     end_date: str = None,
     exclude_dates: bool = False,
+    specific_dates: List[str] = None,
 ):
     """
     Generate an Excel report for the course.
@@ -620,14 +648,15 @@ async def generate_excel_report(
         start_date: str - Optional start date to filter quizzes (format: YYYY-MM-DD)
         end_date: str - Optional end date to filter quizzes (format: YYYY-MM-DD)
         exclude_dates: bool - Whether to exclude (True) or include (False) quizzes in the date range
+        specific_dates: List[str] - Optional list of specific dates to include or exclude
     """
     logger.debug(
         f"Generating Excel report for course ID: {course_id}, timeframe: {start_date} to {end_date}, "
-        f"exclude_dates: {exclude_dates}, save_to_file: {save_to_file}"
+        f"exclude_dates: {exclude_dates}, specific_dates: {specific_dates}, save_to_file: {save_to_file}"
     )
     # Fetch the course report data with optional timeframe filtering
     report_data = await fetch_course_report(
-        course_id, start_date, end_date, exclude_dates
+        course_id, start_date, end_date, exclude_dates, specific_dates
     )
 
     # Create Excel file in memory
