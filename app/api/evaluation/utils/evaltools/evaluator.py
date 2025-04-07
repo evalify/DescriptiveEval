@@ -553,7 +553,10 @@ class ResponseEvaluator:
                         )
 
             score_res = last_response
-            if not score_res or score_res.get("status") != EvaluationStatus.SUCCESS:
+            if not score_res or score_res.get("status") not in [
+                EvaluationStatus.SUCCESS,
+                EvaluationStatus.EMPTY_ANSWER,
+            ]:
                 if not score_res:
                     score_res = {
                         "score": 0,
