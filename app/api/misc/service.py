@@ -44,10 +44,10 @@ def populate_course_sheet(
         class_name = class_result["name"] if class_result else report_data["class_id"]
     logger.debug("Course and class names fetched from database.")
 
-    # Determine sheet name if not provided
+    # Determine sheet name if not provided and ensure it's unique by appending a part of course_id
     if not sheet_name:
         sheet_name = (
-            course_code[:30] if course_code else course_id[:30]
+            f"{course_code[:20]}_{course_id[:10]}" if course_code else course_id[:30]
         )  # Excel sheet name limit is 31 characters
 
     # ----- CALCULATE PERCENTAGES AND CREATE COMBINED DATAFRAME -----
