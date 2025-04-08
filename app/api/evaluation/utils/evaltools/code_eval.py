@@ -12,6 +12,9 @@ from app.core.exceptions import InvalidQuestionError
 
 load_dotenv()
 
+successful_test_case = "successful"
+failed_test_case = "failed"
+
 
 async def evaluate_coding_question(
     student_response: str,
@@ -29,7 +32,9 @@ async def evaluate_coding_question(
     """
     if test_cases_count == 0:
         # Infer test cases count from the driver code
-        test_cases_count = driver_code.count("successful!")
+        test_cases_count = driver_code.lower().count("successful")
+        # test_cases_count = len(re.findall(r'\bsuccessful\b', driver_code.lower())) #TODO: Check if this is better
+        logger.debug(f"Inferred {test_cases_count} test cases from driver code")
         if test_cases_count == 0:
             raise InvalidQuestionError("No Test Cases are present in driver code")
 
@@ -45,10 +50,19 @@ async def evaluate_coding_question(
     cleaned_code = cleanCode(student_response, language_id)
 
     code_output = {}
+    combined_output = None
     try:
         code_output = get_code_result(
             cleaned_code, driver_code, language_id=language_id
         )
+
+        combined_output = (
+            code_output.get("stdout", "")
+            + (code_output.get("stderr") or "")
+            + (code_output.get("compile_output") or "")
+            + (code_output.get("error") or "")
+        )
+
         if code_output.get("stdout"):
             passed_cases, total_cases = count_test_cases(code_output["stdout"])
 
@@ -56,21 +70,13 @@ async def evaluate_coding_question(
                 logger.warning(
                     "No test cases detected, probably an input function or inf loop"
                 )
-                return (
-                    0,
-                    test_cases_count,
-                    code_output["stdout"] + (code_output.get("stderr") or ""),
-                )
+                return (0, test_cases_count, combined_output)
 
             if test_cases_count != -1 and total_cases != test_cases_count:
                 logger.warning(
                     f"Expected {test_cases_count} test cases but got {total_cases}"
                 )
-                return (
-                    0,
-                    test_cases_count,
-                    code_output["stdout"] + (code_output.get("stderr") or ""),
-                )
+                return (0, test_cases_count, combined_output)
 
             if passed_cases == total_cases and total_cases > 0:
                 logger.info("All test cases passed")
@@ -84,7 +90,7 @@ async def evaluate_coding_question(
     return (
         0,
         test_cases_count,
-        (code_output.get("stdout") or "") + (code_output.get("stderr") or ""),
+        combined_output or "No output",
     )
 
 
@@ -184,9 +190,14 @@ def count_test_cases(code_output: str) -> tuple[int, int]:
     :param code_output:
     :return: successful, total test cases
     """
-    test_cases = code_output.split("\n")
-    successful = test_cases.count("Test case successful!")
-    failed = test_cases.count("Test case failed!")
+    test_cases = code_output.lower().split("\n")
+    successful = failed = 0
+    for test_case in test_cases:
+        if successful_test_case in test_case:
+            successful += 1
+        elif failed_test_case in test_case:
+            failed += 1
+
     return successful, successful + failed
 
 
