@@ -428,7 +428,7 @@ async def bulk_evaluate_quiz_responses(
                 if question_count_by_type.get("DESCRIPTIVE", 0)
                 + question_count_by_type.get("FILL_IN_BLANK", 0)
                 > 0
-                else 10 * EVAL_BATCH_SIZE
+                else max(min(10 * EVAL_BATCH_SIZE, 80), EVAL_BATCH_SIZE)
             )
 
             for i in range(0, total_responses, effective_batch_size):
