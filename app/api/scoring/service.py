@@ -194,13 +194,15 @@ async def generate_guidelines(
         template=guidelines_template,
     )
 
-    _input = prompt_template.format(
-        question=question, expected_ans=expected_ans, score=total_score, errors=errors
-    )
-
     response = parsed_response = None
     try:
         for i in range(MAX_RETRIES + 1):
+            _input = prompt_template.format(
+                question=question,
+                expected_ans=expected_ans,
+                score=total_score,
+                errors=errors,
+            )
             response = await llm.ainvoke(_input)
             if hasattr(response, "content"):
                 response = response.content
@@ -216,16 +218,29 @@ async def generate_guidelines(
                 logger.warning(
                     f"Retrying {i}/{MAX_RETRIES} because Unable to parse response error {str(e)}"
                 )
+                errors.append(
+                    f"Unable to parse response error {str(e)}. Response: {response}"
+                )
             else:
                 if i > 0:
                     logger.info(f"Successfully scored response after {i} attempt(s)")
                 break
+            finally:
+                if i == MAX_RETRIES:
+                    logger.warning(
+                        f"Failed to parse response after {MAX_RETRIES} attempts. Response: {response}. Returning Json without parsing"
+                    )
+                    return {
+                        "status": 200,
+                        "guidelines": str(
+                            response
+                        ),  # Return the raw response if parsing fails
+                    }
         assert parsed_response is not None, "Error: Failed to get/parse response"
         return {
             "status": 200,
-            "guidelines": str(
-                parsed_response.get("guidelines", "No guidelines available")
-            ),
+            "guidelines": "The Following is in json, just use the guidelines provided"
+            + str(parsed_response.get("guidelines", "No guidelines available")),
         }
     except Exception as e:
         logger.error(f"Error processing response: {str(e)}. {response=}", exc_info=True)

@@ -123,6 +123,12 @@ Note, guidelines should be within \"double quotes\", ensure proper json formatti
 All criteria should be in this str and in proper markdown format.
 The sum of all criteria scores should be equal to the total score. Mention the total score.
 You need to list out criteria for evaluation and also on the strictness of evaluation, whether spelling mistakes should be penalized heavily or not.
+
+Errors:
+You will be given multiple chances to answer if the system detects errors in your response.
+Your output should contain a json object marked within ```json ... ``` containing the above mentioned fields.
+
+Errors accumulated so far: {errors}
 """
 
 qa_enhancement_template = """

@@ -204,7 +204,13 @@ async def bulk_evaluate_quiz_responses(
                     )
                 )
         if descriptive_tasks:
-            guidelines_results = await asyncio.gather(*descriptive_tasks)
+            # Batch processing guidelines tasks
+            guidelines_results = []
+            batch_size = 5  # TODO: Add an env variable for this
+            for i in range(0, len(descriptive_tasks), batch_size):
+                batch = descriptive_tasks[i : i + batch_size]
+                results = await asyncio.gather(*batch)
+                guidelines_results.extend(results)
             for question, guidelines in zip(descriptive_questions, guidelines_results):
                 question["guidelines"] = guidelines
 

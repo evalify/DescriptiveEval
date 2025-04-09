@@ -15,7 +15,7 @@ from redis import Redis
 from app.api.scoring.service import generate_guidelines
 from app.core.logger import logger
 from app.utils.misc import DateTimeEncoder, save_quiz_data
-from app.config.constants import CACHE_EX, MAX_RETRIES, DB_MAX_RETRIES
+from app.config.constants import CACHE_EX, DB_MAX_RETRIES
 from app.database.postgres import get_db_connection_no_context
 
 load_dotenv()
@@ -37,42 +37,24 @@ async def get_guidelines(
     guidelines = None
     errors = []
 
-    for attempt in range(MAX_RETRIES):
-        try:
-            guidelines = await generate_guidelines(
-                llm, question, expected_answer, total_score, errors
-            )
-            if (
-                guidelines["guidelines"].startswith(
-                    ("Error:", "Error processing response:")
-                )
-                or guidelines["status"] == 403
-            ):
-                error_msg = guidelines.get("error")
-                logger.warning(
-                    f"Attempt {attempt + 1}/{MAX_RETRIES}: Failed to generate guidelines for question {question_id}: {error_msg}"
-                )
-                errors.append(error_msg)
-                continue
-            break
-        except Exception as e:
-            error_msg = f"Unexpected error generating guidelines: {str(e)}"
-            logger.warning(f"Attempt {attempt + 1}/{MAX_RETRIES}: {error_msg}")
-            errors.append(error_msg)
+    try:
+        guidelines = await generate_guidelines(
+            llm, question, expected_answer, total_score, errors
+        )
+    except Exception as e:
+        error_msg = f"Unexpected error generating guidelines: {str(e)}"
+        errors.append(error_msg)
 
     if guidelines is None or int(guidelines.get("status", 403)) == 403:
         error_details = "\n".join(errors)
         logger.error(
-            f"Failed to generate guidelines for question {question_id} after {MAX_RETRIES} attempts.\n"
+            f"Failed to generate guidelines for question {question_id}"
             f"Errors encountered:\n{error_details}\n"
             f"Guidelines response: {guidelines if guidelines else 'None'}"
         )
         # FIXME: Temporary error override
         # raise LLMEvaluationError(
         # f"Failed to generate guidelines after {MAX_RETRIES} attempts.\nErrors encountered:\n{error_details}")
-        logger.warning(
-            f"Failed to generate guidelines for question {question_id} after {MAX_RETRIES} attempts.\n"
-        )
     else:
         redis_client.set(
             f"guidelines:{question_id}_guidelines_cache",
