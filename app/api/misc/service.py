@@ -354,7 +354,7 @@ def populate_course_sheet(
     normalization_mark = report_data.get("normalization_mark", 30.0)
 
     # Calculate the column index for the average column
-    avg_col_index = rank_start_col + quiz_count
+    avg_col_index = rank_start_col + quiz_count + 1
     avg_col_letter = get_column_letter(avg_col_index)
 
     # Add header for the average column
