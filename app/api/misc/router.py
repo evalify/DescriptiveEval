@@ -17,17 +17,21 @@ async def get_course_report(request: CourseReportRequest):
     Allows filtering by date range using start_date and end_date parameters (format: YYYY-MM-DD).
     The exclude_dates parameter determines whether to include or exclude quizzes in the specified date range.
     Alternatively, you can provide specific_dates as a list of exact dates to include or exclude.
+    You can also control the "Average of Best N" calculation with best_avg_count and normalization_mark.
     """
     course_id = request.course_id
     start_date = request.start_date
     end_date = request.end_date
     exclude_dates = request.exclude_dates
     specific_dates = request.specific_dates
+    best_avg_count = request.best_avg_count
+    normalization_mark = request.normalization_mark
 
     logger.debug(
         f"Received request to generate course report for course_id: {course_id}, "
         f"timeframe: {start_date} to {end_date}, exclude_dates: {exclude_dates}, "
-        f"specific_dates: {specific_dates}"
+        f"specific_dates: {specific_dates}, best_avg_count: {best_avg_count}, "
+        f"normalization_mark: {normalization_mark}"
     )
     try:
         # Generate the Excel report
@@ -39,6 +43,8 @@ async def get_course_report(request: CourseReportRequest):
             end_date=end_date,
             exclude_dates=exclude_dates,
             specific_dates=specific_dates,
+            best_avg_count=best_avg_count,
+            normalization_mark=normalization_mark,
         )
         course_code = excel_data.get("course_code")
 
@@ -87,17 +93,21 @@ async def get_class_report(request: ClassReportRequest):
     Allows filtering by date range using start_date and end_date parameters (format: YYYY-MM-DD).
     The exclude_dates parameter determines whether to include or exclude quizzes in the specified date range.
     The specific_dates parameter allows filtering by a specific list of dates.
+    You can also control the "Average of Best N" calculation with best_avg_count and normalization_mark.
     """
     class_id = request.class_id
     start_date = request.start_date
     end_date = request.end_date
     exclude_dates = request.exclude_dates
     specific_dates = request.specific_dates
+    best_avg_count = request.best_avg_count
+    normalization_mark = request.normalization_mark
 
     logger.debug(
         f"Received request to generate class report for class_id: {class_id}, "
         f"timeframe: {start_date} to {end_date}, exclude_dates: {exclude_dates}, "
-        f"specific_dates: {specific_dates}"
+        f"specific_dates: {specific_dates}, best_avg_count: {best_avg_count}, "
+        f"normalization_mark: {normalization_mark}"
     )
     try:
         # Generate the Excel report for all courses in the class
@@ -109,6 +119,8 @@ async def get_class_report(request: ClassReportRequest):
             end_date=end_date,
             exclude_dates=exclude_dates,
             specific_dates=specific_dates,
+            best_avg_count=best_avg_count,
+            normalization_mark=normalization_mark,
         )
         excel_data = response.get("file")
         class_name = response.get("class_name")

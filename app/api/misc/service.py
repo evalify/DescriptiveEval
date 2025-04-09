@@ -346,6 +346,45 @@ def populate_course_sheet(
 
     # Add header for the sorted percentages section
     rank_start_col = start_col + quiz_count * 2 + spacing_offset
+
+    # Add the "Average of Best N / Normalization" column after sorted percentages
+    best_avg_count = min(
+        report_data.get("best_avg_count", 4), quiz_count
+    )  # Ensure we don't exceed available quizzes
+    normalization_mark = report_data.get("normalization_mark", 30.0)
+
+    # Calculate the column index for the average column
+    avg_col_index = rank_start_col + quiz_count
+    avg_col_letter = get_column_letter(avg_col_index)
+
+    # Add header for the average column
+    avg_header_cell = worksheet[f"{avg_col_letter}{quiz_info_table_start_row + 3}"]
+    avg_header_cell.value = f"Best of {best_avg_count} ({normalization_mark})"
+    avg_header_cell.font = Font(bold=True)
+    avg_header_cell.fill = PatternFill(
+        start_color="FFD966", end_color="FFD966", fill_type="solid"
+    )
+    avg_header_cell.alignment = Alignment(
+        wrap_text=True, horizontal="center", vertical="center"
+    )
+    avg_header_cell.border = thin_border
+
+    # For each student row, add the formula to calculate the average of top N scores
+    for row in range(df_start_row + 2, df_start_row + 2 + len(df)):
+        # Determine the Excel column letters for the relevant sorted percentage columns
+        first_sorted_col_letter = get_column_letter(rank_start_col)
+        # Calculate which column contains the Nth best score (ensuring not to exceed available quiz count)
+        last_avg_col_index = rank_start_col + best_avg_count - 1
+        if last_avg_col_index >= rank_start_col + quiz_count:
+            last_avg_col_index = rank_start_col + quiz_count - 1
+        last_avg_col_letter = get_column_letter(last_avg_col_index)
+
+        # Create the Excel formula to calculate average and normalize
+        avg_cell = worksheet[f"{avg_col_letter}{row}"]
+        avg_cell.number_format = "0.00"  # Format as percentage with 2 decimal places
+        avg_cell.value = f"=AVERAGE({first_sorted_col_letter}{row}:{last_avg_col_letter}{row})*{normalization_mark}"
+        avg_cell.border = thin_border
+
     # Apply percentage formatting to percentage columns and sorted percentage columns
     # Find where percentage columns start
     percent_start_col_num = start_col + quiz_count + spacing_offset
@@ -392,6 +431,8 @@ async def generate_excel_class_report(
     end_date: str = None,
     exclude_dates: bool = False,
     specific_dates: List[str] = None,
+    best_avg_count: int = 4,
+    normalization_mark: float = 30.0,
 ) -> Dict[str, BytesIO | str]:
     """
     Generate a multi-sheet Excel report for all courses in a class.
@@ -404,6 +445,8 @@ async def generate_excel_class_report(
         end_date: str - Optional end date to filter quizzes (format: YYYY-MM-DD)
         exclude_dates: bool - Whether to exclude (True) or include (False) quizzes in the date range
         specific_dates: List[str] - Optional list of specific dates to include or exclude
+        best_avg_count: int - Number of top scores to average (default: 4)
+        normalization_mark: float - Normalization mark for the average (default: 30.0)
     """
     # Get all courseids for the class
     query = """
@@ -437,6 +480,10 @@ async def generate_excel_class_report(
                 exclude_dates=exclude_dates,
                 specific_dates=specific_dates,
             )
+            # Add the best_avg_count and normalization_mark to report_data
+            report_data["best_avg_count"] = best_avg_count
+            report_data["normalization_mark"] = normalization_mark
+
             populate_course_sheet(writer, course_id, report_data)
             logger.debug(f"Report sheet generated for course ID: {course_id}")
 
@@ -636,6 +683,8 @@ async def generate_excel_report(
     end_date: str = None,
     exclude_dates: bool = False,
     specific_dates: List[str] = None,
+    best_avg_count: int = 4,
+    normalization_mark: float = 30.0,
 ):
     """
     Generate an Excel report for the course.
@@ -649,15 +698,23 @@ async def generate_excel_report(
         end_date: str - Optional end date to filter quizzes (format: YYYY-MM-DD)
         exclude_dates: bool - Whether to exclude (True) or include (False) quizzes in the date range
         specific_dates: List[str] - Optional list of specific dates to include or exclude
+        best_avg_count: int - Number of top scores to average (default: 4)
+        normalization_mark: float - Normalization mark for the average (default: 30.0)
     """
     logger.debug(
         f"Generating Excel report for course ID: {course_id}, timeframe: {start_date} to {end_date}, "
-        f"exclude_dates: {exclude_dates}, specific_dates: {specific_dates}, save_to_file: {save_to_file}"
+        f"exclude_dates: {exclude_dates}, specific_dates: {specific_dates}, "
+        f"best_avg_count: {best_avg_count}, normalization_mark: {normalization_mark}, "
+        f"save_to_file: {save_to_file}"
     )
     # Fetch the course report data with optional timeframe filtering
     report_data = await fetch_course_report(
         course_id, start_date, end_date, exclude_dates, specific_dates
     )
+
+    # Add the best_avg_count and normalization_mark to report_data
+    report_data["best_avg_count"] = best_avg_count
+    report_data["normalization_mark"] = normalization_mark
 
     # Create Excel file in memory
     if not output_file:
@@ -720,7 +777,7 @@ if __name__ == "__main__":
     # Test save_excel_report
     # directory = "data/reports"
     start_date = None
-    end_date = "2025-03-16"
+    end_date = None  # "2025-03-16"
     # filename = asyncio.run(
     #     generate_excel_report(
     #         course_id, start_date=start_date, end_date=end_date, save_to_file=True
@@ -731,7 +788,12 @@ if __name__ == "__main__":
     class_id = "cm48alxli00007ke7ch082mz0"
     report = asyncio.run(
         generate_excel_class_report(
-            class_id, start_date=start_date, end_date=end_date, save_to_file=True
+            class_id,
+            start_date=start_date,
+            end_date=end_date,
+            save_to_file=True,
+            best_avg_count=2,
+            normalization_mark=20.0,
         )
     )
     # print(report)
