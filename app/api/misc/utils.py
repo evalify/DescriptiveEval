@@ -1,6 +1,7 @@
 import datetime
 from pytz import timezone
 from app.core.logger import logger
+from app.database.postgres import get_db_cursor
 from openpyxl.utils import (
     get_column_letter as openpyxl_get_column_letter,
     column_index_from_string,
@@ -47,3 +48,39 @@ def apply_border_to_range(worksheet, range_string, border):
         for col in range(start_col, end_col + 1):
             cell = worksheet.cell(row=row, column=col)
             cell.border = border
+
+
+async def get_semester_id_from_class_id(class_id: str):
+    """
+    Query the database for the semester corresponding to a given class ID.
+
+    Args:
+        class_id (str): The ID of the class.
+
+    Returns:
+        The semester value if found, otherwise None.
+    """
+    with get_db_cursor() as (cursor, conn):
+        cursor.execute('SELECT semester FROM "Class" WHERE id = %s', (class_id,))
+        result = cursor.fetchone()
+        if result and "semester" in result:
+            return result["semester"]
+        return None
+
+
+async def get_semester_id_from_course_id(course_id: str):
+    """
+    Query the database for the semester corresponding to a given course ID.
+
+    Args:
+        course_id (str): The ID of the course.
+
+    Returns:
+        The semester value if found, otherwise None.
+    """
+    with get_db_cursor() as (cursor, conn):
+        cursor.execute('SELECT "semesterId" FROM "Course" WHERE id = %s', (course_id,))
+        result = cursor.fetchone()
+        if result and "semesterId" in result:
+            return result["semesterId"]
+        return None

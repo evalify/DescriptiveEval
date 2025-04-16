@@ -3,6 +3,7 @@ from fastapi.responses import StreamingResponse
 from app.api.misc.service import generate_excel_report, generate_excel_class_report
 from app.core.logger import logger
 from .models import CourseReportRequest, ClassReportRequest
+from .utils import get_semester_id_from_class_id, get_semester_id_from_course_id
 import time
 
 router = APIRouter(prefix="/misc", tags=["Miscellaneous"])
@@ -167,3 +168,151 @@ async def get_class_report(request: ClassReportRequest):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error generating report: {str(e)}",
         )
+
+
+specific_dates_override = {
+    "S4": [
+        "2025-03-17",
+        "2025-03-18",
+        "2025-03-24",
+        "2025-03-25",
+        "2025-03-26",
+        "2025-03-27",
+        "2025-03-28",
+        "2025-03-29",
+        "2025-04-01",
+        "2025-04-02",
+        "2025-04-03",
+        "2025-04-04",
+        "2025-04-07",
+        "2025-04-12",
+    ],
+    "S2": [
+        "2025-03-17",
+        "2025-03-18",
+        "2025-03-24",
+        "2025-03-25",
+        "2025-03-26",
+        "2025-03-27",
+        "2025-03-28",
+        "2025-03-29",
+        "2025-04-01",
+        "2025-04-02",
+        "2025-04-03",
+        "2025-04-04",
+        "2025-04-05",
+        "2025-04-07",
+        "2025-04-11",
+        "2025-04-12",
+    ],
+}
+
+
+@router.post("/course-report-filtered")
+async def get_course_report_filtered(request: CourseReportRequest):
+    """
+    Generate and stream an Excel report for a course, overriding specific_dates based on semester.
+
+    Returns an Excel file with student scores for all quizzes in the course.
+    Allows filtering by date range using start_date and end_date parameters (format: YYYY-MM-DD).
+    The exclude_dates parameter determines whether to include or exclude quizzes in the specified date range.
+    The specific_dates parameter from the request is IGNORED and overridden based on the course's semester.
+    You can also control the "Average of Best N" calculation with best_avg_count and normalization_mark.
+    """
+    # Determine semester and override specific_dates
+    course_id = request.course_id
+    semester_id = await get_semester_id_from_course_id(course_id)
+    if not semester_id:
+        logger.error(f"Semester ID not found for course {course_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Semester ID not found for course {course_id}",
+        )
+    semester_id = semester_id.strip().upper()
+    specific_dates = specific_dates_override.get(semester_id)
+
+    logger.debug(
+        f"Received request for filtered course report for course_id: {course_id}, "
+        f"timeframe: {request.start_date} to {request.end_date}, exclude_dates: {request.exclude_dates}, "
+        f"best_avg_count: {request.best_avg_count}, normalization_mark: {request.normalization_mark}. "
+        f"Determined semester: {semester_id}. Overriding specific_dates with: {specific_dates}"
+    )
+
+    if specific_dates is None:
+        logger.warning(
+            f"No specific dates override found for semester {semester_id} (course {course_id}). "
+            f"Proceeding without specific_dates filter."
+        )
+
+    # Create a modified copy of the request with overridden specific_dates
+    modified_request = CourseReportRequest(
+        course_id=request.course_id,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        exclude_dates=request.exclude_dates,
+        specific_dates=specific_dates,  # Use overridden dates
+        best_avg_count=request.best_avg_count,
+        normalization_mark=request.normalization_mark,
+    )
+
+    # Forward to the original route handler
+    logger.info(
+        f"Forwarding to course-report with filtered dates for semester {semester_id}"
+    )
+    return await get_course_report(modified_request)
+
+
+@router.post("/class-report-filtered")
+async def get_class_report_filtered(request: ClassReportRequest):
+    """
+    Generate and stream an Excel report for all courses in a class, overriding specific_dates based on semester.
+
+    Returns a single Excel file with multiple sheets, one for each course in the class.
+    Each sheet contains student scores for all quizzes in that course.
+    Allows filtering by date range using start_date and end_date parameters (format: YYYY-MM-DD).
+    The exclude_dates parameter determines whether to include or exclude quizzes in the specified date range.
+    The specific_dates parameter from the request is IGNORED and overridden based on the class's semester.
+    You can also control the "Average of Best N" calculation with best_avg_count and normalization_mark.
+    """
+    class_id = request.class_id
+
+    # Determine semester and override specific_dates
+    semester_id = await get_semester_id_from_class_id(class_id)
+    if not semester_id:
+        logger.error(f"Semester ID not found for class {class_id}")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Semester ID not found for class {class_id}",
+        )
+    semester_id = semester_id.strip().upper()
+    specific_dates = specific_dates_override.get(semester_id)
+
+    logger.debug(
+        f"Received request for filtered class report for class_id: {class_id}, "
+        f"timeframe: {request.start_date} to {request.end_date}, exclude_dates: {request.exclude_dates}, "
+        f"best_avg_count: {request.best_avg_count}, normalization_mark: {request.normalization_mark}. "
+        f"Determined semester: {semester_id}. Overriding specific_dates with: {specific_dates}"
+    )
+
+    if specific_dates is None:
+        logger.warning(
+            f"No specific dates override found for semester {semester_id} (class {class_id}). "
+            f"Proceeding without specific_dates filter."
+        )
+
+    # Create a modified copy of the request with overridden specific_dates
+    modified_request = ClassReportRequest(
+        class_id=request.class_id,
+        start_date=request.start_date,
+        end_date=request.end_date,
+        exclude_dates=request.exclude_dates,
+        specific_dates=specific_dates,  # Use overridden dates
+        best_avg_count=request.best_avg_count,
+        normalization_mark=request.normalization_mark,
+    )
+
+    # Forward to the original route handler
+    logger.info(
+        f"Forwarding to class-report with filtered dates for semester {semester_id}"
+    )
+    return await get_class_report(modified_request)
