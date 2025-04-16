@@ -359,7 +359,7 @@ def populate_course_sheet(
 
     # Add header for the average column
     avg_header_cell = worksheet[f"{avg_col_letter}{quiz_info_table_start_row + 3}"]
-    avg_header_cell.value = f"Best of {best_avg_count} ({normalization_mark})"
+    avg_header_cell.value = f"Best {best_avg_count} ({normalization_mark})"
     avg_header_cell.font = Font(bold=True)
     avg_header_cell.fill = PatternFill(
         start_color="FFD966", end_color="FFD966", fill_type="solid"
@@ -592,7 +592,7 @@ async def fetch_course_report(
                 query += ' AND q."startTime" <= %s'
                 params.append(end_date)
 
-    query += ' ORDER BY s."id", cq."B";'
+    query += ' ORDER BY u."rollNo", cq."B";'
 
     with get_db_cursor() as (cursor, conn):
         cursor.execute(query, tuple(params))
