@@ -166,14 +166,15 @@ async def bulk_evaluate_quiz_responses(
 
         # Handle old schema conversion - globally
         for quiz_result in quiz_responses:
-            for question in questions:
-                qid = question["_id"]
-                if isinstance(quiz_result["responses"].get(qid), list):
-                    quiz_result["responses"][qid] = {
-                        "student_answer": quiz_result["responses"][qid],
-                    }
-            if "questionMarks" in quiz_result:
-                del quiz_result["questionMarks"]
+            if quiz_result:
+                for resp in quiz_result.get("responses") or []:
+                    # qid = question["_id"]
+                    if isinstance(quiz_result["responses"].get(resp), list):
+                        quiz_result["responses"][resp] = {
+                            "student_answer": quiz_result["responses"].get(resp),
+                        }
+                if "questionMarks" in quiz_result:
+                    del quiz_result["questionMarks"]
 
         # Validate quiz setup
         await validate_quiz_setup(quiz_id, questions, quiz_responses)
@@ -453,6 +454,9 @@ async def bulk_evaluate_quiz_responses(
                         progress_bar,
                     )
                     for index, quiz_result in enumerate(batch, start=i + 1)
+                    if quiz_result is not None
+                    and quiz_result.get("responses")
+                    is not None  # TODO: Ensure this is not problematic
                 ]
 
                 # Process batch with timeout

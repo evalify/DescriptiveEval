@@ -84,6 +84,11 @@ async def generate_quiz_report(
     for question in questions:
         question_id = question["_id"]
         for result in quiz_results:
+            if result is None or result["responses"] is None:
+                qlogger.warning(
+                    f"Result is None or responses are None for student {result['studentId']}"
+                )
+                continue  # TODO: Ensure this is not problematic
             if isinstance(result["responses"].get(question_id), list):
                 raise EvaluationError(
                     f"Response is unevaluated for at least one student {result['studentId']}\n"
@@ -98,7 +103,10 @@ async def generate_quiz_report(
             correct = sum(
                 1
                 for result in quiz_results
-                if float(result["responses"].get(question_id, {}).get("score", 0))
+                if result is not None
+                and result["responses"]
+                is not None  # TODO: Ensure this is not problematic
+                and float(result["responses"].get(question_id, {}).get("score", 0))
                 >= 0.6 * float(question["mark"])
             )
         except Exception as e:
@@ -107,6 +115,8 @@ async def generate_quiz_report(
         total_marks_obtained = sum(
             result["responses"].get(question_id, {}).get("score", 0)
             for result in quiz_results
+            if result is not None
+            and result["responses"] is not None  # TODO: Ensure this is not problematic
         )
 
         stats = {
