@@ -68,7 +68,7 @@ async def evaluate_coding_question(
 
             if total_cases == 0:
                 logger.warning(
-                    "No test cases detected, probably an input function or inf loop"
+                    "No test cases printed, probably an input function or infinite loop"
                 )
                 return (0, test_cases_count, combined_output)
 
