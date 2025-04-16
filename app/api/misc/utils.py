@@ -81,6 +81,16 @@ async def get_semester_id_from_course_id(course_id: str):
     with get_db_cursor() as (cursor, conn):
         cursor.execute('SELECT "semesterId" FROM "Course" WHERE id = %s', (course_id,))
         result = cursor.fetchone()
-        if result and "semesterId" in result:
+        if result and result.get("semesterId") is not None:
             return result["semesterId"]
+        else:
+            # Get from class Id if semesterId is None when using courseId
+            logger.warning(
+                f"SemesterId is None for courseId {course_id}. Trying to get from classId."
+            )
+            cursor.execute('SELECT "classId" FROM "Course" WHERE id = %s', (course_id,))
+            class_result = cursor.fetchone()
+            if class_result and class_result.get("classId") is not None:
+                return await get_semester_id_from_class_id(class_result["classId"])
+
         return None
