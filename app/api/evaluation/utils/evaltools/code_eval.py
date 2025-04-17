@@ -57,10 +57,10 @@ async def evaluate_coding_question(
         )
 
         combined_output = (
-            code_output.get("stdout", "")
-            + (code_output.get("stderr") or "")
-            + (code_output.get("compile_output") or "")
-            + (code_output.get("error") or "")
+            str(code_output.get("stdout", "") or "")
+            + str(code_output.get("stderr", "") or "")
+            + str(code_output.get("compile_output", "") or "")
+            + str(code_output.get("error", "") or "")
         )
 
         if code_output.get("stdout"):
@@ -85,7 +85,7 @@ async def evaluate_coding_question(
     except requests.exceptions.ReadTimeout:
         logger.error("Unable to evaluate code - Timeout")
     except Exception as e:
-        logger.error(f"Error evaluating code: {str(e)}")
+        logger.error(f"Error evaluating code: {str(e)}", exc_info=True)
 
     return (
         0,
