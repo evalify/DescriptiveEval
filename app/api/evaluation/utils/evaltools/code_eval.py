@@ -12,8 +12,8 @@ from app.core.exceptions import InvalidQuestionError
 
 load_dotenv()
 
-successful_test_case = "successful"
-failed_test_case = "failed"
+successful_test_case = "success"
+failed_test_case = "fail"
 
 
 async def evaluate_coding_question(
@@ -32,7 +32,7 @@ async def evaluate_coding_question(
     """
     if test_cases_count == 0:
         # Infer test cases count from the driver code
-        test_cases_count = driver_code.lower().count("successful")
+        test_cases_count = driver_code.lower().count(successful_test_case)
         # test_cases_count = len(re.findall(r'\bsuccessful\b', driver_code.lower())) #TODO: Check if this is better
         logger.debug(f"Inferred {test_cases_count} test cases from driver code")
         if test_cases_count == 0:
@@ -70,13 +70,22 @@ async def evaluate_coding_question(
                 logger.warning(
                     "No test cases printed, probably an input function or infinite loop"
                 )
-                return (0, test_cases_count, combined_output)
+                return (
+                    0,
+                    test_cases_count,
+                    combined_output + "- Forced 0 - No test cases printed",
+                )
 
             if test_cases_count != -1 and total_cases != test_cases_count:
-                logger.warning(
+                logger.error(
                     f"Expected {test_cases_count} test cases but got {total_cases}"
                 )
-                return (0, test_cases_count, combined_output)
+                return (
+                    0,
+                    test_cases_count,
+                    combined_output
+                    + f"- Forced 0 - Test cases mismatch - Expected {test_cases_count} test cases but got {total_cases}",
+                )
 
             if passed_cases == total_cases and total_cases > 0:
                 logger.info("All test cases passed")
@@ -90,7 +99,7 @@ async def evaluate_coding_question(
     return (
         0,
         test_cases_count,
-        combined_output or "No output",
+        combined_output or "- Forced 0 - No output",
     )
 
 
