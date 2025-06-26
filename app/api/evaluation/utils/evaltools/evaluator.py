@@ -50,9 +50,10 @@ class ResponseEvaluator:
         self.questions = {
             str(q["_id"]): q for q in questions
         }  # Convert to dict for O(1) lookup
-        self.total_marks = sum(
-            question.get("marks", question["mark"]) for question in questions
-        )  # Questions are already validated before call in validate_quiz_setup
+        # Disable temporarily
+        # self.total_marks = sum(
+        # question.get("marks", question["mark"]) for question in questions
+        # )  # Questions are already validated before call in validate_quiz_setup
 
         self.evaluation_settings = evaluation_settings or {}
         self.llm = llm
@@ -99,6 +100,14 @@ class ResponseEvaluator:
         self.coding_partial_marking = self.evaluation_settings.get(
             "codePartialMark", True
         )
+
+        if (
+            "noOfQuestions" in self.evaluation_settings
+            and self.evaluation_settings["noOfQuestions"] is not None
+        ):
+            self.num_questions = int(self.evaluation_settings["noOfQuestions"])
+        else:
+            raise ValueError("Evaluation settings must include 'noOfQuestions'")
 
     def _get_next_api_key(self):
         """Thread-safe API key rotation"""
@@ -239,10 +248,32 @@ class ResponseEvaluator:
         self.qlogger.info(
             f"Evaluating response {quiz_result['id']} for student {quiz_result['studentId']}"
         )
+
+        # Determine total marks and subset of questions to evaluate
+        if self.num_questions > 0:
+            # Only include questions that the student actually answered
+            responded_qids = [
+                qid for qid in quiz_result["responses"].keys() if qid in self.questions
+            ]
+            self.total_marks = sum(
+                self.questions[qid].get("marks", self.questions[qid]["mark"])
+                for qid in responded_qids
+            )
+            # Build a new dict of only those questions
+            questions_to_evaluate = {qid: self.questions[qid] for qid in responded_qids}
+        else:
+            # Evaluate all questions
+            self.total_marks = sum(
+                question.get("marks", question["mark"])
+                for question in self.questions.values()
+            )
+            questions_to_evaluate = self.questions
+
         quiz_result["totalScore"] = self.total_marks
         # quiz_result["score"] = 0
 
-        for qid, question in self.questions.items():
+        # Loop over the filtered question set
+        for qid, question in questions_to_evaluate.items():
             # Handle old schema conversion
             if isinstance(quiz_result["responses"].get(qid), list):
                 quiz_result["responses"][qid] = {
