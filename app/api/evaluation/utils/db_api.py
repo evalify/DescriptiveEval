@@ -312,6 +312,17 @@ def get_evaluation_settings(cursor, quiz_id: str) -> Optional[Dict[str, Any]]:
     return cursor.fetchone()
 
 
+def get_quiz_settings(cursor, quiz_id: str) -> Optional[Dict[str, Any]]:
+    """
+    Get the quiz settings for a quiz from the Cockroach database.
+    """
+    query = """
+       SELECT * FROM "QuizSettings" WHERE "quizId" = %s;
+    """
+    cursor.execute(query, (quiz_id,))
+    return cursor.fetchone()
+
+
 def get_quiz_isevaluated(
     cursor,
     quiz_id: str,

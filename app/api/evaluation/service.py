@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from .utils.db_api import (
     get_quiz_responses,
     get_evaluation_settings,
+    get_quiz_settings,
     get_all_questions,
     set_quiz_response,
     get_guidelines,
@@ -181,6 +182,15 @@ async def bulk_evaluate_quiz_responses(
 
         # Get evaluation settings
         evaluation_settings = get_evaluation_settings(pg_cursor, quiz_id)
+
+        # Also get Quiz Settings and update the evaluation_settings
+        # FIXME: Quiz Settings and Evaluation settings should not be mixed
+        quiz_settings = get_quiz_settings(pg_cursor, quiz_id)
+        if quiz_settings is not None:
+            if evaluation_settings is not None:
+                evaluation_settings.update(quiz_settings)
+            else:
+                evaluation_settings = quiz_settings
 
         # Count questions by type
         descriptive_tasks = []
