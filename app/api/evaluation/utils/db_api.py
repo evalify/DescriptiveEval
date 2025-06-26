@@ -316,10 +316,24 @@ def get_quiz_settings(cursor, quiz_id: str) -> Optional[Dict[str, Any]]:
     """
     Get the quiz settings for a quiz from the Cockroach database.
     """
-    query = """
-       SELECT * FROM "QuizSettings" WHERE "quizId" = %s;
+    # First query: Get the settingsId from Quiz table
+    query1 = """
+       SELECT "settingsId" FROM "Quiz" WHERE "id" = %s;
     """
-    cursor.execute(query, (quiz_id,))
+    cursor.execute(query1, (quiz_id,))
+    result = cursor.fetchone()
+
+    if not result or not result.get("settingsId"):
+        return None
+
+    settings_id = result["settingsId"]
+
+    # Second query: Get quiz settings using the settingsId
+    query2 = """
+       SELECT * FROM "QuizSettings" WHERE "id" = %s;
+    """
+    cursor.execute(query2, (settings_id,))
+
     return cursor.fetchone()
 
 
